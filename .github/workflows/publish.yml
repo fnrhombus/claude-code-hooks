@@ -53,6 +53,6 @@ jobs:
 
       - name: Publish @fnrhombus/claude-code-hooks
         working-directory: packages/core
-        run: pnpm publish --no-git-checks --access public
-        env:
-          NPM_CONFIG_PROVENANCE: "true"
+        # Use latest npm — pnpm publish has inconsistent OIDC behavior with
+        # scoped packages. Plain npm (fresh via npx) works reliably.
+        run: npx -y npm@latest publish --access public --provenance
