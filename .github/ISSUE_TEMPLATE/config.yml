@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Claude Code hooks documentation
+    url: https://code.claude.com/docs/en/hooks.md
+    about: The upstream API this package wraps
+  - name: claude-code-pathfix
+    url: https://github.com/fnrhombus/claude-code-pathfix
+    about: Real-world hook built on this library

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Thin Unix entrypoint — delegates to scripts/dev-cycle.ts via tsx.
+# Shares all logic with the Windows entrypoint (scripts/dev-cycle.cmd).
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$DIR"
+exec pnpm exec tsx "scripts/dev-cycle.ts" "$@"

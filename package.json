@@ -1,0 +1,22 @@
+{
+  "name": "claude-code-hooks-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Workspace root for @fnrhombus/claude-code-hooks",
+  "scripts": {
+    "build": "pnpm --filter @fnrhombus/claude-code-hooks build",
+    "test": "pnpm --filter claude-code-hooks-tests test",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "sync-types": "bash scripts/dev-cycle.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "packageManager": "pnpm@10.17.0",
+  "engines": {
+    "node": ">=20"
+  }
+}

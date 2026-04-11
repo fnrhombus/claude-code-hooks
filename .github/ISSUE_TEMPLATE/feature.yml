@@ -1,0 +1,17 @@
+name: Feature request
+description: Suggest an API improvement or new helper
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What hook were you trying to write?
+      description: A concrete example is worth more than an abstract description.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would the ideal API look like?
+      description: Paste pseudo-code. We'll iterate from there.
+      render: typescript

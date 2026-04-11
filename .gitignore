@@ -4,3 +4,13 @@ dist/
 .env.*
 !.env.example
 *.log
+
+# dev-cycle pipeline state (ephemeral, one run at a time)
+.dev-cycle-state/
+
+# OS + editor
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+.vscode/
+.idea/

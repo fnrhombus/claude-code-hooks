@@ -1,0 +1,31 @@
+name: Bug report
+description: Something in the wrapper or types is wrong
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      description: Output of `npm ls @fnrhombus/claude-code-hooks`
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      description: Output of `node --version`
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: A 10-line hook script that shows the problem, plus what you expected vs what happened.
+      render: typescript
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Logs, stack traces, screenshots.
