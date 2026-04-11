@@ -1,6 +1,6 @@
 {
   "name": "@fnrhombus/claude-code-hooks",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Strongly-typed TypeScript wrapper for Claude Code hook entrypoints. Write hook scripts as typed functions instead of JSON.parse(process.stdin).",
   "keywords": [
     "claude-code",
