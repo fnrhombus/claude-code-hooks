@@ -32,9 +32,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm -r typecheck
-
+      # Build core FIRST. packages/tests typechecks and imports against the
+      # built dist via the workspace symlink, so without dist/ the typecheck
+      # fails with "Cannot find module '@fnrhombus/claude-code-hooks'".
       - run: pnpm --filter @fnrhombus/claude-code-hooks build
+
+      - run: pnpm -r typecheck
 
       - run: pnpm --filter claude-code-hooks-tests test
 
