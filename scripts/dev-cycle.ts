@@ -31,6 +31,7 @@
  */
 
 import { spawnSync, type SpawnSyncOptions } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,6 +51,15 @@ const MAX_TDD_ATTEMPTS = 5;
 const MAX_POST_RESEARCH_ATTEMPTS = 3;
 const ASSIGNEE = "fnrhombus";
 const MAIN_BRANCH = "main";
+const HOOKS_DOC_URL = "https://code.claude.com/docs/en/hooks.md";
+
+// Model selection for sub-claude invocations. Defaults tuned for token cost:
+// - SONNET: heavy work where quality matters (regen, debugging)
+// - HAIKU: trivial read-and-verdict tasks (PR review)
+// Overriding Opus default because we don't need frontier reasoning for any
+// step — worst case is complex debugging, which Sonnet handles fine.
+const MODEL_SONNET = "claude-sonnet-4-6";
+const MODEL_HAIKU = "claude-haiku-4-5-20251001";
 
 const DRY_RUN = process.env.DEV_CYCLE_DRY_RUN === "1";
 const SKIP_PR = process.env.DEV_CYCLE_SKIP_PR === "1";
@@ -146,10 +156,14 @@ function tryRun(cmd: string, args: string[], options: SpawnSyncOptions = {}): bo
  * Run `claude -p` with a prompt. Returns the text output.
  * Uses --output-format text so output is parseable (no JSON wrapping).
  */
-function claudeRun(
-  prompt: string,
-  { allowFailure = false }: { allowFailure?: boolean } = {},
-): string {
+interface ClaudeRunOptions {
+  allowFailure?: boolean;
+  /** Model to use. Defaults to Sonnet. Pass MODEL_HAIKU for trivial tasks. */
+  model?: string;
+}
+
+function claudeRun(prompt: string, opts: ClaudeRunOptions = {}): string {
+  const { allowFailure = false, model = MODEL_SONNET } = opts;
   // The pipeline runs unattended (scheduled task). Permission prompts would
   // deadlock it, so we skip them. This is safe because the pipeline only runs
   // on its own feature branches inside a worktree — never on main directly.
@@ -158,6 +172,8 @@ function claudeRun(
     [
       "-p",
       "--dangerously-skip-permissions",
+      "--model",
+      model,
       "--output-format",
       "text",
       prompt,
@@ -165,6 +181,19 @@ function claudeRun(
     { allowFailure },
   );
   return res.stdout.trim();
+}
+
+/**
+ * Fetch the upstream hooks.md and return its SHA256. Pure Node — no Claude.
+ * Uses global fetch (Node 20+).
+ */
+async function fetchUpstreamHash(): Promise<string> {
+  const res = await fetch(HOOKS_DOC_URL);
+  if (!res.ok) {
+    throw new Error(`failed to fetch ${HOOKS_DOC_URL}: HTTP ${res.status}`);
+  }
+  const body = await res.text();
+  return createHash("sha256").update(body).digest("hex");
 }
 
 // ----------------------------------------------------------------------------
@@ -209,35 +238,32 @@ function saveState(key: string, value: string | number): void {
 // Pipeline steps
 // ----------------------------------------------------------------------------
 
-step("Step 1: Running regen-hook-types skill");
+// Wrap the main flow in an async IIFE so we can use fetch() at top level.
+await main();
+
+async function main(): Promise<void> {
+
+step("Step 1: Checking upstream hash (no Claude call on fast path)");
 
 const oldHash = readSourceHash(TYPES_FILE);
 log(`current types file hash: ${oldHash || "<none>"}`);
 
+let newHash: string;
 try {
-  claudeRun("Run the regen-hook-types skill. Do not do anything else.");
+  newHash = await fetchUpstreamHash();
 } catch (err) {
-  log(`claude invocation failed: ${err instanceof Error ? err.message : String(err)}`);
+  log(`failed to fetch upstream: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(2);
 }
-
-const newHash = readSourceHash(TYPES_FILE);
-if (!newHash) {
-  die("types file has no SOURCE_SHA256 header after regen");
-}
+log(`upstream hash: ${newHash}`);
 
 if (oldHash === newHash) {
-  log("types are up to date — nothing to do");
+  log("types are up to date — nothing to do (zero Claude tokens consumed)");
   rmSync(STATE_DIR, { recursive: true, force: true });
   process.exit(0);
 }
 
 log(`upstream changed: ${oldHash || "<none>"} → ${newHash}`);
-
-// The skill wrote to the working tree on main. Revert — we'll re-apply inside
-// a feature branch worktree.
-run("git", ["checkout", "--", TYPES_FILE]);
-log(`reverted types file on ${MAIN_BRANCH} — will re-apply in feature branch`);
 
 // ----------------------------------------------------------------------------
 
@@ -302,6 +328,8 @@ process.chdir(worktreeDir);
 
 step("Step 4: Regenerating types in worktree");
 
+// Sonnet handles the regen skill's slow path (rewriting types.ts) well —
+// Opus is overkill for a constrained code-generation task with explicit rules.
 claudeRun("Run the regen-hook-types skill. Do not do anything else.");
 
 const regenHash = readSourceHash(TYPES_FILE);
@@ -346,11 +374,9 @@ for (let attempt = 1; attempt <= MAX_TDD_ATTEMPTS && !success; attempt++) {
   }
   log("build/test failed — asking claude to fix");
   claudeRun(
-    `pnpm test, pnpm -r typecheck, or pnpm build failed after regenerating ${TYPES_FILE}. ` +
-      `Read the failures, fix the wrapper code in packages/core/src/hook.ts and packages/core/src/helpers.ts, ` +
-      `or update tests in packages/tests/src/ to match new upstream types. ` +
-      `Do NOT modify ${TYPES_FILE} — it is authoritative. Do NOT commit. ` +
-      `When you believe everything is fixed, stop.`,
+    `pnpm test / typecheck / build failed after regenerating ${TYPES_FILE}. ` +
+      `Fix packages/core/src/hook.ts, helpers.ts, or packages/tests/src/ to match upstream types. ` +
+      `Do NOT modify ${TYPES_FILE}. Do NOT commit.`,
     { allowFailure: true },
   );
 }
@@ -358,11 +384,9 @@ for (let attempt = 1; attempt <= MAX_TDD_ATTEMPTS && !success; attempt++) {
 if (!success) {
   step(`Step 5b: Research phase (post-${MAX_TDD_ATTEMPTS} failed attempts)`);
   claudeRun(
-    `The TDD loop has failed ${MAX_TDD_ATTEMPTS} times. Research the failure: ` +
-      `use WebFetch or WebSearch to check the upstream hooks.md for semantic changes, ` +
-      `look at related github issues on anthropics/claude-code, and examine the diff between ` +
-      `the old and new types. Write a 200-word findings report to ${STATE_DIR}/research.md. ` +
-      `Do not touch code yet.`,
+    `${MAX_TDD_ATTEMPTS} fix attempts failed. Use WebFetch on hooks.md and git diff ${TYPES_FILE} ` +
+      `to identify what upstream semantics changed. Write ~200 words to ${STATE_DIR}/research.md. ` +
+      `No code edits yet.`,
     { allowFailure: true },
   );
 
@@ -373,9 +397,7 @@ if (!success) {
       break;
     }
     claudeRun(
-      `Post-research fix attempt ${attempt}/${MAX_POST_RESEARCH_ATTEMPTS}. ` +
-        `Read ${STATE_DIR}/research.md. Apply what you learned to fix the build. ` +
-        `Do NOT modify ${TYPES_FILE}. Do NOT commit.`,
+      `Read ${STATE_DIR}/research.md and fix the build. Do NOT modify ${TYPES_FILE}. Do NOT commit.`,
       { allowFailure: true },
     );
   }
@@ -482,18 +504,16 @@ log("CI passed");
 
 // ----------------------------------------------------------------------------
 
-step("Step 8: PR review");
+step("Step 8: PR review (Haiku — read diff, emit verdict)");
 
+// Haiku is enough here: the task is "read a diff against a checklist and
+// output LGTM or one reason". No deep reasoning required.
 const review = claudeRun(
-  `You are reviewing PR #${prNumber} on fnrhombus/claude-code-hooks. ` +
-    `Use 'gh pr view ${prNumber}' and 'gh pr diff ${prNumber}' to see the changes. ` +
-    `This is an automated type-sync PR triggered by an upstream Claude Code hooks doc change. ` +
-    `Check: (1) the sha256 header is present and matches the new upstream hash, ` +
-    `(2) no hand-edits to ${TYPES_FILE} beyond the regen, ` +
-    `(3) the wrapper in hook.ts and helpers.ts still compiles and the tests cover the new ` +
-    `event types if any were added, ` +
-    `(4) no accidental breaking changes to the public API beyond what the upstream change requires. ` +
-    `Reply with exactly 'LGTM' on its own line if you approve, or a paragraph explaining what's wrong.`,
+  `Review PR #${prNumber} (run 'gh pr diff ${prNumber}'). Automated type-sync PR. ` +
+    `Verify: sha256 header matches new hash, ${TYPES_FILE} only contains regenerated content, ` +
+    `no unintended wrapper API breakage. Reply exactly 'LGTM' on its own line to approve, ` +
+    `or one paragraph stating what's wrong.`,
+  { model: MODEL_HAIKU },
 );
 
 if (!/^LGTM$/m.test(review)) {
@@ -524,3 +544,5 @@ log(`removed worktree ${worktreeDir}`);
 rmSync(STATE_DIR, { recursive: true, force: true });
 log(`dev-cycle complete for ${newHash}`);
 process.exit(0);
+
+} // end of async function main()
