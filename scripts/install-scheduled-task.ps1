@@ -60,6 +60,57 @@ if (-not $TaskPath.EndsWith("\"))   { $TaskPath = $TaskPath + "\" }
 
 $ErrorActionPreference = "Stop"
 
+# ----------------------------------------------------------------------------
+# Reactive elevation helpers
+#
+# Don't gate anything on admin up front — just try the operation, and if
+# the OS says "access denied" we re-launch ourselves elevated. Prefer
+# gsudo --direct (keeps output in the current console) and fall back to
+# Start-Process -Verb RunAs (new UAC window) when gsudo isn't installed.
+# ----------------------------------------------------------------------------
+
+function Test-IsElevationError {
+    param($ErrorRecord)
+    if ($ErrorRecord.Exception -is [UnauthorizedAccessException]) { return $true }
+    # HRESULT 0x80070005 == E_ACCESSDENIED, signed form -2147024891.
+    if ($ErrorRecord.Exception.HResult -eq -2147024891) { return $true }
+    $msg = "$($ErrorRecord.Exception.Message)"
+    return $msg -match "(?i)access (is )?denied|requires elevation|not authorized|insufficient privilege"
+}
+
+function Get-ForwardArgs {
+    # Re-serialize the current invocation's bound parameters into an
+    # argument array we can pass to a re-launched pwsh.
+    $forward = @()
+    foreach ($kv in $PSBoundParameters.GetEnumerator()) {
+        if ($kv.Value -is [System.Management.Automation.SwitchParameter]) {
+            if ($kv.Value.IsPresent) { $forward += "-$($kv.Key)" }
+        } else {
+            $forward += "-$($kv.Key)"
+            $forward += [string]$kv.Value
+        }
+    }
+    return $forward
+}
+
+function Invoke-Elevated {
+    $forwardArgs = Get-ForwardArgs
+
+    $gsudo = (Get-Command gsudo -ErrorAction SilentlyContinue).Source
+    if ($gsudo) {
+        Write-Host ""
+        Write-Host "Access denied — relaunching via gsudo (attached)..." -ForegroundColor Yellow
+        & $gsudo --direct pwsh -NoProfile -File $PSCommandPath @forwardArgs
+        exit $LASTEXITCODE
+    }
+
+    Write-Host ""
+    Write-Host "Access denied and gsudo not found — relaunching via UAC (new window)..." -ForegroundColor Yellow
+    $startArgs = @("-NoProfile", "-File", $PSCommandPath) + $forwardArgs
+    Start-Process pwsh -Verb RunAs -ArgumentList $startArgs -Wait
+    exit $LASTEXITCODE
+}
+
 # Resolve repo root relative to this script — works regardless of where
 # it's invoked from.
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -75,14 +126,19 @@ if (-not (Test-Path $DevCycleTs)) {
 # ----------------------------------------------------------------------------
 
 if ($Uninstall) {
-    $existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
-    if ($null -eq $existing) {
-        Write-Host "Task '$TaskPath$TaskName' is not registered — nothing to remove."
+    try {
+        $existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
+        if ($null -eq $existing) {
+            Write-Host "Task '$TaskPath$TaskName' is not registered — nothing to remove."
+            exit 0
+        }
+        Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
+        Write-Host "Removed scheduled task '$TaskPath$TaskName'."
         exit 0
+    } catch {
+        if (Test-IsElevationError $_) { Invoke-Elevated }
+        throw
     }
-    Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
-    Write-Host "Removed scheduled task '$TaskPath$TaskName'."
-    exit 0
 }
 
 # ----------------------------------------------------------------------------
@@ -148,18 +204,26 @@ $task = New-ScheduledTask `
     -Description "Autonomous upstream-hook-types sync pipeline for @fnrhombus/claude-code-hooks. Runs scripts/dev-cycle.ts which short-circuits if nothing changed."
 
 # ----------------------------------------------------------------------------
-# Idempotent register — update if exists, create if not
+# Idempotent register — update if exists, create if not.
+# Wrapped in try/catch so that if any operation here fails with an
+# elevation error (most likely when -Highest is set), we re-launch the
+# whole script elevated instead of failing the user.
 # ----------------------------------------------------------------------------
 
-$existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
-if ($existing) {
-    Write-Host "Task '$TaskPath$TaskName' already exists — replacing."
-    Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
-}
+try {
+    $existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
+    if ($existing) {
+        Write-Host "Task '$TaskPath$TaskName' already exists — replacing."
+        Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
+    }
 
-# Register-ScheduledTask auto-creates the folder on first install, so we
-# don't need to mess with the Task Scheduler COM object manually.
-Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -InputObject $task | Out-Null
+    # Register-ScheduledTask auto-creates the folder on first install, so
+    # we don't need to mess with the Task Scheduler COM object manually.
+    Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -InputObject $task | Out-Null
+} catch {
+    if (Test-IsElevationError $_) { Invoke-Elevated }
+    throw
+}
 
 Write-Host ""
 Write-Host "✓ Registered scheduled task '$TaskPath$TaskName'." -ForegroundColor Green
