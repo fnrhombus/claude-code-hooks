@@ -176,7 +176,65 @@ Write-Host ""
 
 # ----------------------------------------------------------------------------
 # Auto-close countdown — 10s with live updating, cancel on any key press.
+# Only runs if we were launched into a transient console that would close
+# on exit. If the parent process is a known persistent terminal, the user
+# will have the output in front of them as long as they want it.
 # ----------------------------------------------------------------------------
+
+function Test-PersistentParentTerminal {
+    # Walk the process ancestry tree looking for either a GUI terminal
+    # host (definitively persistent) or a launcher like explorer/services
+    # (definitively transient). Shells like cmd/pwsh/bash/gsudo are
+    # intermediate — we walk *through* them without deciding.
+    #
+    # Examples:
+    #   Terminal: WindowsTerminal → pwsh → cmd → pwsh(this)
+    #     walk finds WindowsTerminal, return true
+    #   Double-click .cmd: explorer → cmd → pwsh(this)
+    #     walk finds explorer, return false
+    #   gsudo from terminal: WindowsTerminal → pwsh → gsudo → pwsh(this)
+    #     walk skips gsudo, finds WindowsTerminal, return true
+    #   gsudo double-clicked: explorer → cmd → gsudo → pwsh(this)
+    #     walk skips gsudo+cmd, finds explorer, return false
+
+    $guiTerminals = @(
+        "WindowsTerminal", "OpenConsole",
+        "mintty", "ConEmu", "ConEmu64",
+        "alacritty", "wezterm", "kitty",
+        # VS Code / Cursor integrated terminals
+        "Code", "Code - Insiders", "Cursor", "devenv"
+    )
+    $transientRoots = @(
+        "explorer", "svchost", "services", "winlogon", "csrss", "wininit"
+    )
+
+    $currentId = $PID
+    for ($depth = 0; $depth -lt 12; $depth++) {
+        try {
+            $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$currentId" -ErrorAction Stop
+            $parentId = $proc.ParentProcessId
+            if (-not $parentId -or $parentId -eq 0) { return $false }
+            $parent = Get-Process -Id $parentId -ErrorAction Stop
+        } catch {
+            # Parent died or inaccessible — default to transient.
+            return $false
+        }
+
+        $name = $parent.ProcessName
+        if ($guiTerminals   -icontains $name) { return $true  }
+        if ($transientRoots -icontains $name) { return $false }
+
+        # Intermediate shell or gsudo — keep walking.
+        $currentId = $parentId
+    }
+    # Ran out of depth — default to transient.
+    return $false
+}
+
+if (Test-PersistentParentTerminal) {
+    # Nothing to do — the user has a persistent window. Exit cleanly.
+    exit 0
+}
 
 # Drain any keypresses that buffered up while the install ran, so the
 # loop below doesn't instantly exit on a stale enter/space.
