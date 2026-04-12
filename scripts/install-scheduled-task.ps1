@@ -142,27 +142,28 @@ if ($Uninstall) {
 }
 
 # ----------------------------------------------------------------------------
-# Resolve pnpm.exe — tasks run outside the interactive shell and may not
-# have mise-activated PATH, so we embed the full path at install time.
+# Resolve mise.exe — the task runs outside the interactive shell where
+# mise PATH activation doesn't happen, so we embed the full path at
+# install time. Inside the task we call `mise exec -- pnpm exec tsx ...`
+# so mise reads the repo's .mise.toml and activates the pinned node+pnpm
+# versions before running anything.
 # ----------------------------------------------------------------------------
 
-$pnpm = (Get-Command pnpm.exe -ErrorAction SilentlyContinue).Source
-if (-not $pnpm) {
-    $pnpm = (Get-Command pnpm -ErrorAction SilentlyContinue).Source
+$mise = (Get-Command mise.exe -ErrorAction SilentlyContinue).Source
+if (-not $mise) {
+    $mise = (Get-Command mise -ErrorAction SilentlyContinue).Source
 }
-if (-not $pnpm) {
+if (-not $mise) {
     throw @"
-pnpm is not on PATH. Activate mise (or install pnpm globally) before
-running this script:
+mise is not on PATH. Install it from https://mise.jdx.dev and verify:
 
-    mise install         # installs pnpm per .mise.toml
-    pnpm --version       # verify it's on PATH
+    mise --version
 
 Then re-run install-scheduled-task.ps1.
 "@
 }
 
-Write-Host "Resolved pnpm: $pnpm"
+Write-Host "Resolved mise: $mise"
 Write-Host "Repo root:     $RepoRoot"
 Write-Host "Dev cycle:     $DevCycleTs"
 Write-Host "Schedule:      daily at $Time"
@@ -173,8 +174,8 @@ Write-Host ""
 # ----------------------------------------------------------------------------
 
 $action = New-ScheduledTaskAction `
-    -Execute $pnpm `
-    -Argument "exec tsx scripts/dev-cycle.ts" `
+    -Execute $mise `
+    -Argument "exec -- pnpm exec tsx scripts/dev-cycle.ts" `
     -WorkingDirectory $RepoRoot.Path
 
 $trigger = New-ScheduledTaskTrigger -Daily -At $Time
