@@ -182,10 +182,14 @@ Write-Host ""
 # loop below doesn't instantly exit on a stale enter/space.
 while ([Console]::KeyAvailable) { [Console]::ReadKey($true) | Out-Null }
 
-$msgFmt = "`rThis script will automatically close in {0,2} seconds. Press any key to close now."
+# Right-pad number to 2 chars ({0,2}) and swap the "s" in "seconds" for a
+# space when count is 1, so every rendered line is exactly the same
+# width — no residual chars leaking between frames.
+$msgFmt = "`rClosing in {0,2} second{1}. Press any key to exit now."
 $cancelled = $false
 for ($remaining = 10; $remaining -gt 0; $remaining--) {
-    Write-Host ($msgFmt -f $remaining) -NoNewline
+    $plural = if ($remaining -eq 1) { " " } else { "s" }
+    Write-Host ($msgFmt -f $remaining, $plural) -NoNewline -ForegroundColor DarkGray
     # Poll 10x per second so key-press response feels immediate instead of
     # lagging by up to a full second.
     for ($tick = 0; $tick -lt 10; $tick++) {
