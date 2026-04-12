@@ -172,3 +172,30 @@ Write-Host "    Start-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath"
 Write-Host ""
 Write-Host "Uninstall with:"
 Write-Host "    pwsh -File scripts/install-scheduled-task.ps1 -Uninstall"
+Write-Host ""
+
+# ----------------------------------------------------------------------------
+# Auto-close countdown — 10s with live updating, cancel on any key press.
+# ----------------------------------------------------------------------------
+
+# Drain any keypresses that buffered up while the install ran, so the
+# loop below doesn't instantly exit on a stale enter/space.
+while ([Console]::KeyAvailable) { [Console]::ReadKey($true) | Out-Null }
+
+$msgFmt = "`rThis script will automatically close in {0,2} seconds. Press any key to close now."
+$cancelled = $false
+for ($remaining = 10; $remaining -gt 0; $remaining--) {
+    Write-Host ($msgFmt -f $remaining) -NoNewline
+    # Poll 10x per second so key-press response feels immediate instead of
+    # lagging by up to a full second.
+    for ($tick = 0; $tick -lt 10; $tick++) {
+        if ([Console]::KeyAvailable) {
+            [Console]::ReadKey($true) | Out-Null
+            $cancelled = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if ($cancelled) { break }
+}
+Write-Host ""
