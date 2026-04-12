@@ -63,19 +63,21 @@ $ErrorActionPreference = "Stop"
 # ----------------------------------------------------------------------------
 # Reactive elevation helpers
 #
-# Don't gate anything on admin up front — just try the operation, and if
-# the OS says "access denied" we re-launch ourselves elevated. Prefer
-# gsudo --direct (keeps output in the current console) and fall back to
-# Start-Process -Verb RunAs (new UAC window) when gsudo isn't installed.
+# Don't gate anything on admin up front — just try the operation. If
+# something fails and we're not already admin, re-launch elevated and
+# let the admin-level copy try the same thing. If we're already admin,
+# the error is real and we propagate it.
+#
+# Prefer gsudo --direct (keeps output in the current console) and fall
+# back to Start-Process -Verb RunAs (new UAC window) when gsudo isn't
+# installed.
 # ----------------------------------------------------------------------------
 
-function Test-IsElevationError {
-    param($ErrorRecord)
-    if ($ErrorRecord.Exception -is [UnauthorizedAccessException]) { return $true }
-    # HRESULT 0x80070005 == E_ACCESSDENIED, signed form -2147024891.
-    if ($ErrorRecord.Exception.HResult -eq -2147024891) { return $true }
-    $msg = "$($ErrorRecord.Exception.Message)"
-    return $msg -match "(?i)access (is )?denied|requires elevation|not authorized|insufficient privilege"
+function Test-IsElevated {
+    $principal = [Security.Principal.WindowsPrincipal]::new(
+        [Security.Principal.WindowsIdentity]::GetCurrent()
+    )
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
 function Get-ForwardArgs {
@@ -136,7 +138,11 @@ if ($Uninstall) {
         Write-Host "Removed scheduled task '$TaskPath$TaskName'."
         exit 0
     } catch {
-        if (Test-IsElevationError $_) { Invoke-Elevated }
+        # Already admin → error is real, not a permissions issue.
+        # Not admin → retry everything under elevation. Most task-
+        # scheduler operations that fail here do so because the S4U
+        # logon type needs "Log on as batch job", which requires admin.
+        if (-not (Test-IsElevated)) { Invoke-Elevated }
         throw
     }
 }
@@ -227,7 +233,10 @@ try {
     # we don't need to mess with the Task Scheduler COM object manually.
     Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -InputObject $task | Out-Null
 } catch {
-    if (Test-IsElevationError $_) { Invoke-Elevated }
+    # Already admin → error is real, not a permissions issue.
+    # Not admin → retry everything under elevation. S4U tasks in
+    # particular need "Log on as batch job" which requires admin.
+    if (-not (Test-IsElevated)) { Invoke-Elevated }
     throw
 }
 
