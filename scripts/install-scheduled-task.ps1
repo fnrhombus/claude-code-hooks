@@ -190,7 +190,12 @@ $settings = New-ScheduledTaskSettingsSet `
 
 $principalArgs = @{
     UserId    = "$env:USERDOMAIN\$env:USERNAME"
-    LogonType = "Interactive"
+    # S4U (Service for User) runs the task with our user identity — so
+    # mise, git credentials, and $env:USERPROFILE all resolve correctly
+    # — but without attaching to an interactive desktop session. That
+    # means no console window flash when the task fires, and the task
+    # still runs when we're logged out.
+    LogonType = "S4U"
 }
 if ($Highest) {
     $principalArgs.RunLevel = "Highest"
