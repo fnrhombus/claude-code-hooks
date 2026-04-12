@@ -20,6 +20,11 @@
 .PARAMETER TaskName
   Name of the scheduled task. Default "claude-code-hooks-sync".
 
+.PARAMETER TaskPath
+  Task Scheduler folder to install the task into. Default "\rhombus\"
+  (groups all fnrhombus tasks together in the Task Scheduler UI). The
+  folder is created automatically if it doesn't exist.
+
 .PARAMETER Highest
   Run with highest privileges. Requires elevation (use gsudo).
 
@@ -43,9 +48,15 @@
 param(
     [string]$Time = "03:30",
     [string]$TaskName = "claude-code-hooks-sync",
+    [string]$TaskPath = "\rhombus\",
     [switch]$Highest,
     [switch]$Uninstall
 )
+
+# Normalize the TaskPath: Register-ScheduledTask requires it to start
+# and end with a backslash.
+if (-not $TaskPath.StartsWith("\")) { $TaskPath = "\" + $TaskPath }
+if (-not $TaskPath.EndsWith("\"))   { $TaskPath = $TaskPath + "\" }
 
 $ErrorActionPreference = "Stop"
 
@@ -64,13 +75,13 @@ if (-not (Test-Path $DevCycleTs)) {
 # ----------------------------------------------------------------------------
 
 if ($Uninstall) {
-    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
     if ($null -eq $existing) {
-        Write-Host "Task '$TaskName' is not registered — nothing to remove."
+        Write-Host "Task '$TaskPath$TaskName' is not registered — nothing to remove."
         exit 0
     }
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-    Write-Host "Removed scheduled task '$TaskName'."
+    Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
+    Write-Host "Removed scheduled task '$TaskPath$TaskName'."
     exit 0
 }
 
@@ -140,22 +151,24 @@ $task = New-ScheduledTask `
 # Idempotent register — update if exists, create if not
 # ----------------------------------------------------------------------------
 
-$existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+$existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
 if ($existing) {
-    Write-Host "Task '$TaskName' already exists — replacing."
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    Write-Host "Task '$TaskPath$TaskName' already exists — replacing."
+    Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
 }
 
-Register-ScheduledTask -TaskName $TaskName -InputObject $task | Out-Null
+# Register-ScheduledTask auto-creates the folder on first install, so we
+# don't need to mess with the Task Scheduler COM object manually.
+Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -InputObject $task | Out-Null
 
 Write-Host ""
-Write-Host "✓ Registered scheduled task '$TaskName'." -ForegroundColor Green
+Write-Host "✓ Registered scheduled task '$TaskPath$TaskName'." -ForegroundColor Green
 Write-Host ""
 Write-Host "Inspect it with:"
-Write-Host "    Get-ScheduledTask -TaskName $TaskName | Get-ScheduledTaskInfo"
+Write-Host "    Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath | Get-ScheduledTaskInfo"
 Write-Host ""
 Write-Host "Trigger a run right now with:"
-Write-Host "    Start-ScheduledTask -TaskName $TaskName"
+Write-Host "    Start-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath"
 Write-Host ""
 Write-Host "Uninstall with:"
 Write-Host "    pwsh -File scripts/install-scheduled-task.ps1 -Uninstall"
