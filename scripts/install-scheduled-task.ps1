@@ -60,58 +60,11 @@ if (-not $TaskPath.EndsWith("\"))   { $TaskPath = $TaskPath + "\" }
 
 $ErrorActionPreference = "Stop"
 
-# ----------------------------------------------------------------------------
-# Reactive elevation helpers
+# This script requires admin — task-scheduler operations on S4U tasks
+# need "Log on as batch job" which is an admin-only privilege. Run it
+# with gsudo or a regular sudo equivalent:
 #
-# Don't gate anything on admin up front — just try the operation. If
-# something fails and we're not already admin, re-launch elevated and
-# let the admin-level copy try the same thing. If we're already admin,
-# the error is real and we propagate it.
-#
-# Prefer gsudo --direct (keeps output in the current console) and fall
-# back to Start-Process -Verb RunAs (new UAC window) when gsudo isn't
-# installed.
-# ----------------------------------------------------------------------------
-
-function Test-IsElevated {
-    $principal = [Security.Principal.WindowsPrincipal]::new(
-        [Security.Principal.WindowsIdentity]::GetCurrent()
-    )
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-function Get-ForwardArgs {
-    # Re-serialize the current invocation's bound parameters into an
-    # argument array we can pass to a re-launched pwsh.
-    $forward = @()
-    foreach ($kv in $PSBoundParameters.GetEnumerator()) {
-        if ($kv.Value -is [System.Management.Automation.SwitchParameter]) {
-            if ($kv.Value.IsPresent) { $forward += "-$($kv.Key)" }
-        } else {
-            $forward += "-$($kv.Key)"
-            $forward += [string]$kv.Value
-        }
-    }
-    return $forward
-}
-
-function Invoke-Elevated {
-    $forwardArgs = Get-ForwardArgs
-
-    $gsudo = (Get-Command gsudo -ErrorAction SilentlyContinue).Source
-    if ($gsudo) {
-        Write-Host ""
-        Write-Host "Access denied — relaunching via gsudo (attached)..." -ForegroundColor Yellow
-        & $gsudo --direct pwsh -NoProfile -File $PSCommandPath @forwardArgs
-        exit $LASTEXITCODE
-    }
-
-    Write-Host ""
-    Write-Host "Access denied and gsudo not found — relaunching via UAC (new window)..." -ForegroundColor Yellow
-    $startArgs = @("-NoProfile", "-File", $PSCommandPath) + $forwardArgs
-    Start-Process pwsh -Verb RunAs -ArgumentList $startArgs -Wait
-    exit $LASTEXITCODE
-}
+#     gsudo pwsh -File scripts/install-scheduled-task.ps1
 
 # Resolve repo root relative to this script — works regardless of where
 # it's invoked from.
@@ -128,23 +81,14 @@ if (-not (Test-Path $DevCycleTs)) {
 # ----------------------------------------------------------------------------
 
 if ($Uninstall) {
-    try {
-        $existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
-        if ($null -eq $existing) {
-            Write-Host "Task '$TaskPath$TaskName' is not registered — nothing to remove."
-            exit 0
-        }
-        Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
-        Write-Host "Removed scheduled task '$TaskPath$TaskName'."
+    $existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
+    if ($null -eq $existing) {
+        Write-Host "Task '$TaskPath$TaskName' is not registered — nothing to remove."
         exit 0
-    } catch {
-        # Already admin → error is real, not a permissions issue.
-        # Not admin → retry everything under elevation. Most task-
-        # scheduler operations that fail here do so because the S4U
-        # logon type needs "Log on as batch job", which requires admin.
-        if (-not (Test-IsElevated)) { Invoke-Elevated }
-        throw
     }
+    Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
+    Write-Host "Removed scheduled task '$TaskPath$TaskName'."
+    exit 0
 }
 
 # ----------------------------------------------------------------------------
@@ -217,28 +161,17 @@ $task = New-ScheduledTask `
 
 # ----------------------------------------------------------------------------
 # Idempotent register — update if exists, create if not.
-# Wrapped in try/catch so that if any operation here fails with an
-# elevation error (most likely when -Highest is set), we re-launch the
-# whole script elevated instead of failing the user.
 # ----------------------------------------------------------------------------
 
-try {
-    $existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
-    if ($existing) {
-        Write-Host "Task '$TaskPath$TaskName' already exists — replacing."
-        Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
-    }
-
-    # Register-ScheduledTask auto-creates the folder on first install, so
-    # we don't need to mess with the Task Scheduler COM object manually.
-    Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -InputObject $task | Out-Null
-} catch {
-    # Already admin → error is real, not a permissions issue.
-    # Not admin → retry everything under elevation. S4U tasks in
-    # particular need "Log on as batch job" which requires admin.
-    if (-not (Test-IsElevated)) { Invoke-Elevated }
-    throw
+$existing = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -ErrorAction SilentlyContinue
+if ($existing) {
+    Write-Host "Task '$TaskPath$TaskName' already exists — replacing."
+    Unregister-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Confirm:$false
 }
+
+# Register-ScheduledTask auto-creates the folder on first install, so
+# we don't need to mess with the Task Scheduler COM object manually.
+Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -InputObject $task | Out-Null
 
 Write-Host ""
 Write-Host "✓ Registered scheduled task '$TaskPath$TaskName'." -ForegroundColor Green
