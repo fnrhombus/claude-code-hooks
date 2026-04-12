@@ -175,7 +175,7 @@ Write-Host ""
 
 $action = New-ScheduledTaskAction `
     -Execute $mise `
-    -Argument "exec -- pnpm exec tsx scripts/dev-cycle.ts" `
+    -Argument "exec -- tsx scripts/dev-cycle.ts" `
     -WorkingDirectory $RepoRoot.Path
 
 $trigger = New-ScheduledTaskTrigger -Daily -At $Time
