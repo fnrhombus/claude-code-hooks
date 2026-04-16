@@ -270,7 +270,6 @@ export async function dispatch(
       return wrap(
         "SessionStart",
         await callHandler(handlers.sessionStart, input),
-        pickHookSpecific(["additionalContext", "sessionTitle"]),
       );
 
     case "SessionEnd":
@@ -278,48 +277,31 @@ export async function dispatch(
 
     case "UserPromptSubmit": {
       const ret = await callHandler(handlers.userPromptSubmit, input);
-      return wrapBlockable(
-        "UserPromptSubmit",
-        ret,
-        pickHookSpecific(["additionalContext", "sessionTitle"]),
-      );
+      return wrapBlockable("UserPromptSubmit", ret);
     }
 
     case "PreToolUse": {
       const handler = resolveToolHandler(handlers.preToolUse, input.tool_name);
       const ret = await callHandler(handler, input);
-      return wrap(
-        "PreToolUse",
-        ret,
-        pickHookSpecific([
-          "permissionDecision",
-          "permissionDecisionReason",
-          "updatedInput",
-          "additionalContext",
-        ]),
-      );
+      return wrap("PreToolUse", ret);
     }
 
     case "PermissionRequest": {
       const handler = resolveToolHandler(handlers.permissionRequest, input.tool_name);
       const ret = await callHandler(handler, input);
-      return wrap("PermissionRequest", ret, pickHookSpecific(["decision"]));
+      return wrap("PermissionRequest", ret);
     }
 
     case "PermissionDenied": {
       const handler = resolveToolHandler(handlers.permissionDenied, input.tool_name);
       const ret = await callHandler(handler, input);
-      return wrap("PermissionDenied", ret, pickHookSpecific(["retry"]));
+      return wrap("PermissionDenied", ret);
     }
 
     case "PostToolUse": {
       const handler = resolveToolHandler(handlers.postToolUse, input.tool_name);
       const ret = await callHandler(handler, input);
-      return wrapBlockable(
-        "PostToolUse",
-        ret,
-        pickHookSpecific(["additionalContext", "updatedMCPToolOutput"]),
-      );
+      return wrapBlockable("PostToolUse", ret);
     }
 
     case "PostToolUseFailure": {
@@ -328,26 +310,14 @@ export async function dispatch(
         input.tool_name,
       );
       const ret = await callHandler(handler, input);
-      return wrapBlockable(
-        "PostToolUseFailure",
-        ret,
-        pickHookSpecific(["additionalContext"]),
-      );
+      return wrapBlockable("PostToolUseFailure", ret);
     }
 
     case "Notification":
-      return wrap(
-        "Notification",
-        await callHandler(handlers.notification, input),
-        pickHookSpecific(["additionalContext"]),
-      );
+      return wrap("Notification", await callHandler(handlers.notification, input));
 
     case "SubagentStart":
-      return wrap(
-        "SubagentStart",
-        await callHandler(handlers.subagentStart, input),
-        pickHookSpecific(["additionalContext"]),
-      );
+      return wrap("SubagentStart", await callHandler(handlers.subagentStart, input));
 
     case "SubagentStop":
       return wrapBlockable(
@@ -396,7 +366,7 @@ export async function dispatch(
 
     case "WorktreeCreate": {
       const ret = await callHandler(handlers.worktreeCreate, input);
-      return wrap("WorktreeCreate", ret, pickHookSpecific(["worktreePath"]));
+      return wrap("WorktreeCreate", ret);
     }
 
     case "WorktreeRemove":
@@ -412,18 +382,10 @@ export async function dispatch(
       return wrap("PostCompact", await callHandler(handlers.postCompact, input));
 
     case "Elicitation":
-      return wrap(
-        "Elicitation",
-        await callHandler(handlers.elicitation, input),
-        pickHookSpecific(["action", "content"]),
-      );
+      return wrap("Elicitation", await callHandler(handlers.elicitation, input));
 
     case "ElicitationResult":
-      return wrap(
-        "ElicitationResult",
-        await callHandler(handlers.elicitationResult, input),
-        pickHookSpecific(["action", "content"]),
-      );
+      return wrap("ElicitationResult", await callHandler(handlers.elicitationResult, input));
   }
 }
 
@@ -438,7 +400,6 @@ const UNIVERSAL_KEYS = [
   "systemMessage",
 ] as const;
 
-type UniversalKey = (typeof UNIVERSAL_KEYS)[number];
 
 async function callHandler<I, R>(
   handler: Handler<I, R> | undefined,
@@ -459,20 +420,20 @@ function resolveToolHandler<I extends { tool_name: string }, R>(
   return map[toolName] ?? map.default;
 }
 
-function pickHookSpecific<K extends string>(keys: readonly K[]) {
-  return (ret: Record<string, unknown>): Record<string, unknown> => {
-    const picked: Record<string, unknown> = {};
-    for (const k of keys) {
-      if (ret[k] !== undefined) picked[k] = ret[k];
-    }
-    return picked;
-  };
+/** Keys that live on the top-level HookOutput, not inside hookSpecificOutput. */
+const NON_SPECIFIC_KEYS = new Set<string>([...UNIVERSAL_KEYS, "block"]);
+
+function pickHookSpecific(ret: Record<string, unknown>): Record<string, unknown> {
+  const picked: Record<string, unknown> = {};
+  for (const k of Object.keys(ret)) {
+    if (!NON_SPECIFIC_KEYS.has(k) && ret[k] !== undefined) picked[k] = ret[k];
+  }
+  return picked;
 }
 
 function wrap(
   eventName: string,
   ret: object | undefined,
-  pickSpecific?: (ret: Record<string, unknown>) => Record<string, unknown>,
 ): HookOutput | undefined {
   if (ret === undefined) return undefined;
   const retRec = ret as Record<string, unknown>;
@@ -486,15 +447,12 @@ function wrap(
     }
   }
 
-  if (pickSpecific) {
-    const specific = pickSpecific(retRec);
-    if (Object.keys(specific).length > 0) {
-      const hookSpecific = {
-        hookEventName: eventName,
-        ...specific,
-      } as unknown as NonNullable<HookOutput["hookSpecificOutput"]>;
-      output.hookSpecificOutput = hookSpecific;
-    }
+  const specific = pickHookSpecific(retRec);
+  if (Object.keys(specific).length > 0) {
+    output.hookSpecificOutput = {
+      hookEventName: eventName,
+      ...specific,
+    } as unknown as NonNullable<HookOutput["hookSpecificOutput"]>;
   }
 
   return output;
@@ -507,12 +465,11 @@ function wrap(
 function wrapBlockable(
   eventName: string,
   ret: object | undefined,
-  pickSpecific?: (ret: Record<string, unknown>) => Record<string, unknown>,
 ): HookOutput | undefined {
   if (ret === undefined) return undefined;
   const retRec = ret as Record<string, unknown>;
 
-  const output = wrap(eventName, ret, pickSpecific) ?? {};
+  const output = wrap(eventName, ret) ?? {};
 
   if (typeof retRec.block === "string") {
     output.decision = "block";
