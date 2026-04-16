@@ -5,7 +5,9 @@ import type {
   ConfigChangeInput,
   CwdChangedInput,
   EditToolInput,
+  ElicitationHookOutput,
   ElicitationInput,
+  ElicitationResultHookOutput,
   ElicitationResultInput,
   ExitPlanModeInput,
   FileChangedInput,
@@ -14,29 +16,37 @@ import type {
   HookInput,
   HookOutput,
   InstructionsLoadedInput,
+  NotificationHookOutput,
   NotificationInput,
-  PermissionDecision,
+  PermissionDeniedHookOutput,
   PermissionDeniedInput,
-  PermissionRequestDecision,
+  PermissionRequestHookOutput,
   PermissionRequestInput,
   PostCompactInput,
+  PostToolUseFailureHookOutput,
   PostToolUseFailureInput,
+  PostToolUseHookOutput,
   PostToolUseInput,
   PreCompactInput,
+  PreToolUseHookOutput,
   PreToolUseInput,
   ReadToolInput,
   SessionEndInput,
+  SessionStartHookOutput,
   SessionStartInput,
   StopFailureInput,
   StopInput,
+  SubagentStartHookOutput,
   SubagentStartInput,
   SubagentStopInput,
   TaskCompletedInput,
   TaskCreatedInput,
   TeammateIdleInput,
+  UserPromptSubmitHookOutput,
   UserPromptSubmitInput,
   WebFetchToolInput,
   WebSearchToolInput,
+  WorktreeCreateHookOutput,
   WorktreeCreateInput,
   WorktreeRemoveInput,
   WriteToolInput,
@@ -58,65 +68,22 @@ export interface UniversalReturn {
   systemMessage?: string;
 }
 
-export interface PreToolUseReturn extends UniversalReturn {
-  permissionDecision?: PermissionDecision;
-  permissionDecisionReason?: string;
-  updatedInput?: Record<string, unknown>;
-  additionalContext?: string;
-}
+/** Derive a handler return type from a HookOutput type: drop the discriminator, add universal fields. */
+type HookReturn<T> = Omit<T, "hookEventName"> & UniversalReturn;
+type BlockableHookReturn<T> = HookReturn<T> & { block?: string };
 
-export interface PermissionRequestReturn extends UniversalReturn {
-  decision?: PermissionRequestDecision;
-}
-
-export interface PostToolUseReturn extends UniversalReturn {
-  additionalContext?: string;
-  updatedMCPToolOutput?: unknown;
-  /** Block completion and send `reason` back to Claude. */
-  block?: string;
-}
-
-export interface PostToolUseFailureReturn extends UniversalReturn {
-  additionalContext?: string;
-}
-
-export interface PermissionDeniedReturn extends UniversalReturn {
-  retry?: boolean;
-}
-
-export interface UserPromptSubmitReturn extends UniversalReturn {
-  additionalContext?: string;
-  sessionTitle?: string;
-  /** Block the prompt from entering context; shown to the user. */
-  block?: string;
-}
-
-export interface SessionStartReturn extends UniversalReturn {
-  additionalContext?: string;
-  sessionTitle?: string;
-}
-
-export interface SubagentStartReturn extends UniversalReturn {
-  additionalContext?: string;
-}
-
-export interface NotificationReturn extends UniversalReturn {
-  additionalContext?: string;
-}
-
-export interface WorktreeCreateReturn extends UniversalReturn {
-  worktreePath?: string;
-}
-
-export interface ElicitationReturn extends UniversalReturn {
-  action?: "accept" | "decline" | "cancel";
-  content?: Record<string, unknown>;
-}
-
-export interface ElicitationResultReturn extends UniversalReturn {
-  action?: "accept" | "decline" | "cancel";
-  content?: Record<string, unknown>;
-}
+export type PreToolUseReturn = HookReturn<PreToolUseHookOutput>;
+export type PermissionRequestReturn = HookReturn<PermissionRequestHookOutput>;
+export type PostToolUseReturn = BlockableHookReturn<PostToolUseHookOutput>;
+export type PostToolUseFailureReturn = HookReturn<PostToolUseFailureHookOutput>;
+export type PermissionDeniedReturn = HookReturn<PermissionDeniedHookOutput>;
+export type UserPromptSubmitReturn = BlockableHookReturn<UserPromptSubmitHookOutput>;
+export type SessionStartReturn = HookReturn<SessionStartHookOutput>;
+export type SubagentStartReturn = HookReturn<SubagentStartHookOutput>;
+export type NotificationReturn = HookReturn<NotificationHookOutput>;
+export type WorktreeCreateReturn = HookReturn<WorktreeCreateHookOutput>;
+export type ElicitationReturn = HookReturn<ElicitationHookOutput>;
+export type ElicitationResultReturn = HookReturn<ElicitationResultHookOutput>;
 
 /** Events without event-specific output fields still accept universal fields. */
 export type StopReturn = UniversalReturn & { block?: string };
