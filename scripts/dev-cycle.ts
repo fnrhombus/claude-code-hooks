@@ -475,20 +475,9 @@ async function main(): Promise<void> {
     `Closes #${issueNumber}\n`;
 
   const prTitle = `regen: sync hook types to upstream ${newHash.slice(0, 8)}`;
-  const prRes = capture("gh", [
-    "pr",
-    "create",
-    "--base",
-    MAIN_BRANCH,
-    "--head",
-    branch,
-    "--title",
-    prTitle,
-    "--body",
-    prBody,
-    "--label",
-    "automated,type-sync",
-  ]);
+  const prArgs = ["pr", "create", "--base", MAIN_BRANCH, "--head", branch, "--title", prTitle, "--body", prBody];
+  const withLabels = capture("gh", [...prArgs, "--label", "automated,type-sync"], { allowFailure: true });
+  const prRes = withLabels.status === 0 ? withLabels : capture("gh", prArgs);
   const prUrl = prRes.stdout.trim().split(/\r?\n/).pop() ?? "";
   const prNumber = Number(prUrl.split("/").pop());
   saveState("pr-number", prNumber);
