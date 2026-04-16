@@ -79,6 +79,7 @@ Read `/tmp/hooks-src.md` in full. From its content, produce `packages/core/src/t
 - No comments beyond the header, the section banners, and one-line field clarifications where the source explicitly defines units or constraints ("Milliseconds.", "Only set when...", etc.).
 - No `export default`, no classes, no runtime code. Only `export type` and `export interface`.
 - No imports. This file must be self-contained.
+- **Inline single-use simple types.** If a string-literal union type is referenced exactly once in the file (as a field type in one interface), do not declare it as a standalone `export type`. Instead, inline the union directly at the usage site. Types referenced two or more times, or that are interfaces/complex shapes, remain standalone. Example: if `SessionSource` is only used as `SessionStartInput.source`, write `source: "startup" | "resume" | "clear" | "compact";` directly in the interface instead of declaring `export type SessionSource = ...` separately.
 
 **File ending:** exactly one trailing newline.
 
