@@ -85,7 +85,7 @@ function step(msg: string): void {
 }
 function die(msg: string): never {
   log(`FATAL: ${msg}`);
-  process.exit(1);
+  exitClean(1);
 }
 
 // ----------------------------------------------------------------------------
@@ -241,11 +241,46 @@ function saveState(key: string, value: string | number): void {
 }
 
 // ----------------------------------------------------------------------------
+// Cleanup
+// ----------------------------------------------------------------------------
+
+let cleanupWorktreeDir: string | undefined;
+let cleanupBranch: string | undefined;
+
+/** Remove worktree, local branch, and state dir. Safe to call multiple times or with partial state. */
+function cleanup(): void {
+  process.chdir(REPO_DIR);
+
+  if (cleanupWorktreeDir) {
+    tryRun("git", ["worktree", "remove", cleanupWorktreeDir, "--force"]);
+    log(`cleaned up worktree ${cleanupWorktreeDir}`);
+  }
+  // Prune stale worktree refs (handles the case where the dir was already gone).
+  tryRun("git", ["worktree", "prune"]);
+
+  if (cleanupBranch) {
+    tryRun("git", ["branch", "-D", cleanupBranch]);
+  }
+
+  rmSync(STATE_DIR, { recursive: true, force: true });
+}
+
+/** Clean up, then exit. */
+function exitClean(code: number): never {
+  cleanup();
+  process.exit(code);
+}
+
+// ----------------------------------------------------------------------------
 // Pipeline steps
 // ----------------------------------------------------------------------------
 
 // Wrap the main flow in an async IIFE so we can use fetch() at top level.
-await main();
+// Catch unhandled errors so cleanup always runs.
+await main().catch((err) => {
+  log(`UNHANDLED: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+  exitClean(1);
+});
 
 async function main(): Promise<void> {
 
@@ -259,14 +294,13 @@ async function main(): Promise<void> {
     newHash = await fetchUpstreamHash();
   } catch (err) {
     log(`failed to fetch upstream: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(2);
+    exitClean(2);
   }
   log(`upstream hash: ${newHash}`);
 
   if (oldHash === newHash && !FORCE) {
     log("types are up to date — nothing to do (zero Claude tokens consumed)");
-    rmSync(STATE_DIR, { recursive: true, force: true });
-    process.exit(0);
+    exitClean(0);
   }
   if (FORCE && oldHash === newHash) {
     log("--force: skipping hash check, regenerating anyway");
@@ -329,6 +363,8 @@ async function main(): Promise<void> {
   }
   saveState("branch", branch);
   saveState("worktree", worktreeDir);
+  cleanupWorktreeDir = worktreeDir;
+  cleanupBranch = branch;
 
   // All subsequent work happens in the worktree.
   process.chdir(worktreeDir);
@@ -446,7 +482,7 @@ async function main(): Promise<void> {
     }
 
     log(`gave up — issue #${issueNumber} assigned, BLOCKERS.md updated`);
-    process.exit(3);
+    exitClean(3);
   }
 
   log("TDD loop passed");
@@ -455,14 +491,14 @@ async function main(): Promise<void> {
 
   if (SKIP_PR) {
     log("DEV_CYCLE_SKIP_PR set — stopping after local branch is ready");
-    process.exit(0);
+    exitClean(0);
   }
 
   step("Step 6: Pushing branch and opening PR");
 
   if (DRY_RUN) {
     log(`DRY_RUN: would push ${branch} and open PR`);
-    process.exit(0);
+    exitClean(0);
   }
 
   run("git", ["push", "-u", "origin", branch]);
@@ -496,7 +532,7 @@ async function main(): Promise<void> {
       "--body",
       `CI failed on PR #${prNumber}. Re-run \`scripts/dev-cycle\` after investigation, or fix manually.`,
     ]);
-    process.exit(4);
+    exitClean(4);
   }
   log("CI passed");
 
@@ -524,7 +560,7 @@ async function main(): Promise<void> {
       "--body",
       `PR review rejected automated sync. See PR #${prNumber} comment for details.`,
     ]);
-    process.exit(5);
+    exitClean(5);
   }
   log("PR review approved");
 
@@ -535,12 +571,7 @@ async function main(): Promise<void> {
   run("gh", ["pr", "merge", String(prNumber), "--squash", "--delete-branch"]);
   log("merged and deleted remote branch");
 
-  process.chdir(REPO_DIR);
-  tryRun("git", ["worktree", "remove", worktreeDir, "--force"]);
-  log(`removed worktree ${worktreeDir}`);
-
-  rmSync(STATE_DIR, { recursive: true, force: true });
   log(`dev-cycle complete for ${newHash}`);
-  process.exit(0);
+  exitClean(0);
 
 } // end of async function main()
