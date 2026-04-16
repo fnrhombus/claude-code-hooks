@@ -42,7 +42,7 @@ import { fileURLToPath } from "node:url";
 
 const REPO_DIR = resolve(
   process.env.DEV_CYCLE_REPO_DIR ??
-    join(dirname(fileURLToPath(import.meta.url)), ".."),
+  join(dirname(fileURLToPath(import.meta.url)), ".."),
 );
 const TYPES_FILE = "packages/core/src/types.ts";
 const BLOCKERS_FILE = "BLOCKERS.md";
@@ -243,306 +243,306 @@ await main();
 
 async function main(): Promise<void> {
 
-step("Step 1: Checking upstream hash (no Claude call on fast path)");
+  step("Step 1: Checking upstream hash (no Claude call on fast path)");
 
-const oldHash = readSourceHash(TYPES_FILE);
-log(`current types file hash: ${oldHash || "<none>"}`);
+  const oldHash = readSourceHash(TYPES_FILE);
+  log(`current types file hash: ${oldHash || "<none>"}`);
 
-let newHash: string;
-try {
-  newHash = await fetchUpstreamHash();
-} catch (err) {
-  log(`failed to fetch upstream: ${err instanceof Error ? err.message : String(err)}`);
-  process.exit(2);
-}
-log(`upstream hash: ${newHash}`);
+  let newHash: string;
+  try {
+    newHash = await fetchUpstreamHash();
+  } catch (err) {
+    log(`failed to fetch upstream: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(2);
+  }
+  log(`upstream hash: ${newHash}`);
 
-if (oldHash === newHash) {
-  log("types are up to date — nothing to do (zero Claude tokens consumed)");
-  rmSync(STATE_DIR, { recursive: true, force: true });
-  process.exit(0);
-}
+  if (oldHash === newHash) {
+    log("types are up to date — nothing to do (zero Claude tokens consumed)");
+    rmSync(STATE_DIR, { recursive: true, force: true });
+    process.exit(0);
+  }
 
-log(`upstream changed: ${oldHash || "<none>"} → ${newHash}`);
+  log(`upstream changed: ${oldHash || "<none>"} → ${newHash}`);
 
-// ----------------------------------------------------------------------------
+  // ----------------------------------------------------------------------------
 
-step("Step 2: Ensuring tracking issue exists");
+  step("Step 2: Ensuring tracking issue exists");
 
-let issueNumber: number | string | null = findIssueForHash(newHash);
-if (issueNumber) {
-  log(`existing issue #${issueNumber} already tracks sha256 ${newHash}`);
-} else if (DRY_RUN) {
-  log(`DRY_RUN: would create issue for ${newHash}`);
-  issueNumber = "DRY-RUN";
-} else {
-  const issueBody =
-    `The upstream Claude Code hooks documentation changed.\n\n` +
-    `- **previous hash:** \`${oldHash || "<none>"}\`\n` +
-    `- **new hash:** \`${newHash}\`\n` +
-    `- **source:** https://code.claude.com/docs/en/hooks.md\n` +
-    `- **triggered by:** \`scripts/dev-cycle\` at ${new Date().toISOString()}\n\n` +
-    `This issue is tracked automatically. A feature branch will be opened to ` +
-    `regenerate \`${TYPES_FILE}\` and fix any downstream breakage.\n`;
+  let issueNumber: number | string | null = findIssueForHash(newHash);
+  if (issueNumber) {
+    log(`existing issue #${issueNumber} already tracks sha256 ${newHash}`);
+  } else if (DRY_RUN) {
+    log(`DRY_RUN: would create issue for ${newHash}`);
+    issueNumber = "DRY-RUN";
+  } else {
+    const issueBody =
+      `The upstream Claude Code hooks documentation changed.\n\n` +
+      `- **previous hash:** \`${oldHash || "<none>"}\`\n` +
+      `- **new hash:** \`${newHash}\`\n` +
+      `- **source:** https://code.claude.com/docs/en/hooks.md\n` +
+      `- **triggered by:** \`scripts/dev-cycle\` at ${new Date().toISOString()}\n\n` +
+      `This issue is tracked automatically. A feature branch will be opened to ` +
+      `regenerate \`${TYPES_FILE}\` and fix any downstream breakage.\n`;
 
-  // Labels may or may not exist; fall back to unlabeled on failure.
-  const titleHash = newHash.slice(0, 8);
-  const title = `Sync hook types: upstream changed (${titleHash})`;
-  const withLabels = capture(
-    "gh",
-    ["issue", "create", "--title", title, "--body", issueBody, "--label", "automated,type-sync"],
-    { allowFailure: true },
-  );
-  const result =
-    withLabels.status === 0
-      ? withLabels
-      : capture("gh", ["issue", "create", "--title", title, "--body", issueBody]);
-  const url = result.stdout.trim().split(/\r?\n/).pop() ?? "";
-  issueNumber = Number(url.split("/").pop());
-  log(`created issue #${issueNumber}`);
-}
-saveState("issue-number", issueNumber);
+    // Labels may or may not exist; fall back to unlabeled on failure.
+    const titleHash = newHash.slice(0, 8);
+    const title = `Sync hook types: upstream changed (${titleHash})`;
+    const withLabels = capture(
+      "gh",
+      ["issue", "create", "--title", title, "--body", issueBody, "--label", "automated,type-sync"],
+      { allowFailure: true },
+    );
+    const result =
+      withLabels.status === 0
+        ? withLabels
+        : capture("gh", ["issue", "create", "--title", title, "--body", issueBody]);
+    const url = result.stdout.trim().split(/\r?\n/).pop() ?? "";
+    issueNumber = Number(url.split("/").pop());
+    log(`created issue #${issueNumber}`);
+  }
+  saveState("issue-number", issueNumber);
 
-// ----------------------------------------------------------------------------
+  // ----------------------------------------------------------------------------
 
-step("Step 3: Creating feature branch and worktree");
+  step("Step 3: Creating feature branch and worktree");
 
-const branch = `sync/hook-types-${newHash.slice(0, 8)}`;
-const worktreeDir = resolve("..", `claude-code-hooks-${branch.replace(/\//g, "-")}`);
+  const branch = `sync/hook-types-${newHash.slice(0, 8)}`;
+  const worktreeDir = resolve("..", `claude-code-hooks-${branch.replace(/\//g, "-")}`);
 
-const existingWorktrees = capture("git", ["worktree", "list"]).stdout;
-if (existingWorktrees.includes(worktreeDir)) {
-  log(`reusing existing worktree at ${worktreeDir}`);
-} else {
-  run("git", ["fetch", "origin", MAIN_BRANCH]);
-  run("git", ["worktree", "add", worktreeDir, "-b", branch, `origin/${MAIN_BRANCH}`]);
-  log(`created worktree at ${worktreeDir} on branch ${branch}`);
-}
-saveState("branch", branch);
-saveState("worktree", worktreeDir);
+  const existingWorktrees = capture("git", ["worktree", "list"]).stdout;
+  if (existingWorktrees.includes(worktreeDir)) {
+    log(`reusing existing worktree at ${worktreeDir}`);
+  } else {
+    run("git", ["fetch", "origin", MAIN_BRANCH]);
+    run("git", ["worktree", "add", worktreeDir, "-b", branch, `origin/${MAIN_BRANCH}`]);
+    log(`created worktree at ${worktreeDir} on branch ${branch}`);
+  }
+  saveState("branch", branch);
+  saveState("worktree", worktreeDir);
 
-// All subsequent work happens in the worktree.
-process.chdir(worktreeDir);
+  // All subsequent work happens in the worktree.
+  process.chdir(worktreeDir);
 
-// ----------------------------------------------------------------------------
+  // ----------------------------------------------------------------------------
 
-step("Step 4: Regenerating types in worktree");
+  step("Step 4: Regenerating types in worktree");
 
-// Sonnet handles the regen skill's slow path (rewriting types.ts) well —
-// Opus is overkill for a constrained code-generation task with explicit rules.
-claudeRun("Run the regen-hook-types skill. Do not do anything else.");
+  // Sonnet handles the regen skill's slow path (rewriting types.ts) well —
+  // Opus is overkill for a constrained code-generation task with explicit rules.
+  claudeRun("Run the regen-hook-types skill. Do not do anything else.");
 
-const regenHash = readSourceHash(TYPES_FILE);
-if (regenHash !== newHash) {
-  die(`worktree regen produced unexpected hash: ${regenHash} != ${newHash}`);
-}
+  const regenHash = readSourceHash(TYPES_FILE);
+  if (regenHash !== newHash) {
+    die(`worktree regen produced unexpected hash: ${regenHash} != ${newHash}`);
+  }
 
-run("git", ["add", TYPES_FILE]);
-run("git", [
-  "commit",
-  "-m",
-  `regen: update hook types to upstream ${newHash}\n\n` +
+  run("git", ["add", TYPES_FILE]);
+  run("git", [
+    "commit",
+    "-m",
+    `regen: update hook types to upstream ${newHash}\n\n` +
     `Upstream hook doc changed.\n` +
     `- previous: ${oldHash || "<none>"}\n` +
     `- new:      ${newHash}\n\n` +
     `Refs #${issueNumber}`,
-]);
-log("committed regenerated types");
+  ]);
+  log("committed regenerated types");
 
-// ----------------------------------------------------------------------------
+  // ----------------------------------------------------------------------------
 
-step(`Step 5: TDD loop (up to ${MAX_TDD_ATTEMPTS} attempts)`);
+  step(`Step 5: TDD loop (up to ${MAX_TDD_ATTEMPTS} attempts)`);
 
-function runTests() {
-  // Try frozen lockfile first; fall back to regular install if it drifts.
-  const installed =
-    tryRun("pnpm", ["install", "--frozen-lockfile"]) ||
-    tryRun("pnpm", ["install"]);
-  if (!installed) return false;
-  if (!tryRun("pnpm", ["-r", "typecheck"])) return false;
-  if (!tryRun("pnpm", ["--filter", "@fnrhombus/claude-code-hooks", "build"])) return false;
-  if (!tryRun("pnpm", ["--filter", "claude-code-hooks-tests", "test"])) return false;
-  return true;
-}
-
-let success = false;
-for (let attempt = 1; attempt <= MAX_TDD_ATTEMPTS && !success; attempt++) {
-  log(`attempt ${attempt}/${MAX_TDD_ATTEMPTS}`);
-  if (runTests()) {
-    success = true;
-    break;
+  function runTests() {
+    // Try frozen lockfile first; fall back to regular install if it drifts.
+    const installed =
+      tryRun("pnpm", ["install", "--frozen-lockfile"]) ||
+      tryRun("pnpm", ["install"]);
+    if (!installed) return false;
+    if (!tryRun("pnpm", ["-r", "typecheck"])) return false;
+    if (!tryRun("pnpm", ["--filter", "@fnrhombus/claude-code-hooks", "build"])) return false;
+    if (!tryRun("pnpm", ["--filter", "claude-code-hooks-tests", "test"])) return false;
+    return true;
   }
-  log("build/test failed — asking claude to fix");
-  claudeRun(
-    `pnpm test / typecheck / build failed after regenerating ${TYPES_FILE}. ` +
-      `Fix packages/core/src/hook.ts, helpers.ts, or packages/tests/src/ to match upstream types. ` +
-      `Do NOT modify ${TYPES_FILE}. Do NOT commit.`,
-    { allowFailure: true },
-  );
-}
 
-if (!success) {
-  step(`Step 5b: Research phase (post-${MAX_TDD_ATTEMPTS} failed attempts)`);
-  claudeRun(
-    `${MAX_TDD_ATTEMPTS} fix attempts failed. Use WebFetch on hooks.md and git diff ${TYPES_FILE} ` +
-      `to identify what upstream semantics changed. Write ~200 words to ${STATE_DIR}/research.md. ` +
-      `No code edits yet.`,
-    { allowFailure: true },
-  );
-
-  for (let attempt = 1; attempt <= MAX_POST_RESEARCH_ATTEMPTS && !success; attempt++) {
-    log(`post-research attempt ${attempt}/${MAX_POST_RESEARCH_ATTEMPTS}`);
+  let success = false;
+  for (let attempt = 1; attempt <= MAX_TDD_ATTEMPTS && !success; attempt++) {
+    log(`attempt ${attempt}/${MAX_TDD_ATTEMPTS}`);
     if (runTests()) {
       success = true;
       break;
     }
+    log("build/test failed — asking claude to fix");
     claudeRun(
-      `Read ${STATE_DIR}/research.md and fix the build. Do NOT modify ${TYPES_FILE}. Do NOT commit.`,
+      `pnpm test / typecheck / build failed after regenerating ${TYPES_FILE}. ` +
+      `Fix packages/core/src/hook.ts, helpers.ts, or packages/tests/src/ to match upstream types. ` +
+      `Do NOT modify ${TYPES_FILE}. Do NOT commit.`,
       { allowFailure: true },
     );
   }
-}
 
-if (!success) {
-  step("Step 5c: Giving up — filing BLOCKERS entry");
-  process.chdir(REPO_DIR);
+  if (!success) {
+    step(`Step 5b: Research phase (post-${MAX_TDD_ATTEMPTS} failed attempts)`);
+    claudeRun(
+      `${MAX_TDD_ATTEMPTS} fix attempts failed. Use WebFetch on hooks.md and git diff ${TYPES_FILE} ` +
+      `to identify what upstream semantics changed. Write ~200 words to ${STATE_DIR}/research.md. ` +
+      `No code edits yet.`,
+      { allowFailure: true },
+    );
 
-  const totalAttempts = MAX_TDD_ATTEMPTS + MAX_POST_RESEARCH_ATTEMPTS;
-  const entry =
-    `\n## ${new Date().toISOString().slice(0, 10)} — sha256 ${newHash} (issue #${issueNumber})\n\n` +
-    `Auto-sync for upstream hash \`${newHash}\` failed after ${totalAttempts} attempts.\n` +
-    `See [#${issueNumber}](https://github.com/fnrhombus/claude-code-hooks/issues/${issueNumber}).\n`;
+    for (let attempt = 1; attempt <= MAX_POST_RESEARCH_ATTEMPTS && !success; attempt++) {
+      log(`post-research attempt ${attempt}/${MAX_POST_RESEARCH_ATTEMPTS}`);
+      if (runTests()) {
+        success = true;
+        break;
+      }
+      claudeRun(
+        `Read ${STATE_DIR}/research.md and fix the build. Do NOT modify ${TYPES_FILE}. Do NOT commit.`,
+        { allowFailure: true },
+      );
+    }
+  }
 
-  const existing = existsSync(BLOCKERS_FILE) ? readFileSync(BLOCKERS_FILE, "utf8") : "# Blockers\n\nLong-standing issues the auto-sync pipeline couldn't handle.\n";
-  writeFileSync(BLOCKERS_FILE, existing + entry);
+  if (!success) {
+    step("Step 5c: Giving up — filing BLOCKERS entry");
+    process.chdir(REPO_DIR);
 
-  if (!DRY_RUN) {
-    run("git", ["add", BLOCKERS_FILE]);
-    run("git", [
-      "commit",
-      "-m",
-      `docs(blockers): auto-sync failed for ${newHash}\n\nRefs #${issueNumber}`,
-    ]);
-    tryRun("git", ["push", "origin", MAIN_BRANCH]);
+    const totalAttempts = MAX_TDD_ATTEMPTS + MAX_POST_RESEARCH_ATTEMPTS;
+    const entry =
+      `\n## ${new Date().toISOString().slice(0, 10)} — sha256 ${newHash} (issue #${issueNumber})\n\n` +
+      `Auto-sync for upstream hash \`${newHash}\` failed after ${totalAttempts} attempts.\n` +
+      `See [#${issueNumber}](https://github.com/fnrhombus/claude-code-hooks/issues/${issueNumber}).\n`;
 
-    tryRun("gh", ["issue", "edit", String(issueNumber), "--add-assignee", ASSIGNEE]);
+    const existing = existsSync(BLOCKERS_FILE) ? readFileSync(BLOCKERS_FILE, "utf8") : "# Blockers\n\nLong-standing issues the auto-sync pipeline couldn't handle.\n";
+    writeFileSync(BLOCKERS_FILE, existing + entry);
+
+    if (!DRY_RUN) {
+      run("git", ["add", BLOCKERS_FILE]);
+      run("git", [
+        "commit",
+        "-m",
+        `docs(blockers): auto-sync failed for ${newHash}\n\nRefs #${issueNumber}`,
+      ]);
+      tryRun("git", ["push", "origin", MAIN_BRANCH]);
+
+      tryRun("gh", ["issue", "edit", String(issueNumber), "--add-assignee", ASSIGNEE]);
+      tryRun("gh", [
+        "issue",
+        "comment",
+        String(issueNumber),
+        "--body",
+        `Auto-sync gave up after ${totalAttempts} attempts. Assigning to @${ASSIGNEE}. ` +
+        `Worktree at ${worktreeDir} left intact for manual inspection; state files in ${STATE_DIR}/.`,
+      ]);
+    }
+
+    log(`gave up — issue #${issueNumber} assigned, BLOCKERS.md updated`);
+    process.exit(3);
+  }
+
+  log("TDD loop passed");
+
+  // ----------------------------------------------------------------------------
+
+  if (SKIP_PR) {
+    log("DEV_CYCLE_SKIP_PR set — stopping after local branch is ready");
+    process.exit(0);
+  }
+
+  step("Step 6: Pushing branch and opening PR");
+
+  if (DRY_RUN) {
+    log(`DRY_RUN: would push ${branch} and open PR`);
+    process.exit(0);
+  }
+
+  run("git", ["push", "-u", "origin", branch]);
+
+  const prBody =
+    `Automated type sync triggered by upstream hook doc change.\n\n` +
+    `- **previous:** \`${oldHash || "<none>"}\`\n` +
+    `- **new:** \`${newHash}\`\n` +
+    `- **source:** https://code.claude.com/docs/en/hooks.md\n\n` +
+    `Closes #${issueNumber}\n`;
+
+  const prTitle = `regen: sync hook types to upstream ${newHash.slice(0, 8)}`;
+  const prRes = capture("gh", [
+    "pr",
+    "create",
+    "--base",
+    MAIN_BRANCH,
+    "--head",
+    branch,
+    "--title",
+    prTitle,
+    "--body",
+    prBody,
+    "--label",
+    "automated,type-sync",
+  ]);
+  const prUrl = prRes.stdout.trim().split(/\r?\n/).pop() ?? "";
+  const prNumber = Number(prUrl.split("/").pop());
+  saveState("pr-number", prNumber);
+  log(`opened PR #${prNumber} at ${prUrl}`);
+
+  // ----------------------------------------------------------------------------
+
+  step("Step 7: Waiting for CI");
+
+  if (!tryRun("gh", ["pr", "checks", String(prNumber), "--watch", "--fail-fast"])) {
+    log("CI failed");
     tryRun("gh", [
       "issue",
       "comment",
       String(issueNumber),
       "--body",
-      `Auto-sync gave up after ${totalAttempts} attempts. Assigning to @${ASSIGNEE}. ` +
-        `Worktree at ${worktreeDir} left intact for manual inspection; state files in ${STATE_DIR}/.`,
+      `CI failed on PR #${prNumber}. Re-run \`scripts/dev-cycle\` after investigation, or fix manually.`,
     ]);
+    process.exit(4);
   }
+  log("CI passed");
 
-  log(`gave up — issue #${issueNumber} assigned, BLOCKERS.md updated`);
-  process.exit(3);
-}
+  // ----------------------------------------------------------------------------
 
-log("TDD loop passed");
+  step("Step 8: PR review (Haiku — read diff, emit verdict)");
 
-// ----------------------------------------------------------------------------
-
-if (SKIP_PR) {
-  log("DEV_CYCLE_SKIP_PR set — stopping after local branch is ready");
-  process.exit(0);
-}
-
-step("Step 6: Pushing branch and opening PR");
-
-if (DRY_RUN) {
-  log(`DRY_RUN: would push ${branch} and open PR`);
-  process.exit(0);
-}
-
-run("git", ["push", "-u", "origin", branch]);
-
-const prBody =
-  `Automated type sync triggered by upstream hook doc change.\n\n` +
-  `- **previous:** \`${oldHash || "<none>"}\`\n` +
-  `- **new:** \`${newHash}\`\n` +
-  `- **source:** https://code.claude.com/docs/en/hooks.md\n\n` +
-  `Closes #${issueNumber}\n`;
-
-const prTitle = `regen: sync hook types to upstream ${newHash.slice(0, 8)}`;
-const prRes = capture("gh", [
-  "pr",
-  "create",
-  "--base",
-  MAIN_BRANCH,
-  "--head",
-  branch,
-  "--title",
-  prTitle,
-  "--body",
-  prBody,
-  "--label",
-  "automated,type-sync",
-]);
-const prUrl = prRes.stdout.trim().split(/\r?\n/).pop() ?? "";
-const prNumber = Number(prUrl.split("/").pop());
-saveState("pr-number", prNumber);
-log(`opened PR #${prNumber} at ${prUrl}`);
-
-// ----------------------------------------------------------------------------
-
-step("Step 7: Waiting for CI");
-
-if (!tryRun("gh", ["pr", "checks", String(prNumber), "--watch", "--fail-fast"])) {
-  log("CI failed");
-  tryRun("gh", [
-    "issue",
-    "comment",
-    String(issueNumber),
-    "--body",
-    `CI failed on PR #${prNumber}. Re-run \`scripts/dev-cycle\` after investigation, or fix manually.`,
-  ]);
-  process.exit(4);
-}
-log("CI passed");
-
-// ----------------------------------------------------------------------------
-
-step("Step 8: PR review (Haiku — read diff, emit verdict)");
-
-// Haiku is enough here: the task is "read a diff against a checklist and
-// output LGTM or one reason". No deep reasoning required.
-const review = claudeRun(
-  `Review PR #${prNumber} (run 'gh pr diff ${prNumber}'). Automated type-sync PR. ` +
+  // Haiku is enough here: the task is "read a diff against a checklist and
+  // output LGTM or one reason". No deep reasoning required.
+  const review = claudeRun(
+    `Review PR #${prNumber} (run 'gh pr diff ${prNumber}'). Automated type-sync PR. ` +
     `Verify: sha256 header matches new hash, ${TYPES_FILE} only contains regenerated content, ` +
     `no unintended wrapper API breakage. Reply exactly 'LGTM' on its own line to approve, ` +
     `or one paragraph stating what's wrong.`,
-  { model: MODEL_HAIKU },
-);
+    { model: MODEL_HAIKU },
+  );
 
-if (!/^LGTM$/m.test(review)) {
-  log("PR review rejected");
-  tryRun("gh", ["pr", "comment", String(prNumber), "--body", `Automated review did not approve:\n\n${review}`]);
-  tryRun("gh", [
-    "issue",
-    "comment",
-    String(issueNumber),
-    "--body",
-    `PR review rejected automated sync. See PR #${prNumber} comment for details.`,
-  ]);
-  process.exit(5);
-}
-log("PR review approved");
+  if (!/^LGTM$/m.test(review)) {
+    log("PR review rejected");
+    tryRun("gh", ["pr", "comment", String(prNumber), "--body", `Automated review did not approve:\n\n${review}`]);
+    tryRun("gh", [
+      "issue",
+      "comment",
+      String(issueNumber),
+      "--body",
+      `PR review rejected automated sync. See PR #${prNumber} comment for details.`,
+    ]);
+    process.exit(5);
+  }
+  log("PR review approved");
 
-// ----------------------------------------------------------------------------
+  // ----------------------------------------------------------------------------
 
-step("Step 9: Merging and cleanup");
+  step("Step 9: Merging and cleanup");
 
-run("gh", ["pr", "merge", String(prNumber), "--squash", "--delete-branch"]);
-log("merged and deleted remote branch");
+  run("gh", ["pr", "merge", String(prNumber), "--squash", "--delete-branch"]);
+  log("merged and deleted remote branch");
 
-process.chdir(REPO_DIR);
-tryRun("git", ["worktree", "remove", worktreeDir, "--force"]);
-log(`removed worktree ${worktreeDir}`);
+  process.chdir(REPO_DIR);
+  tryRun("git", ["worktree", "remove", worktreeDir, "--force"]);
+  log(`removed worktree ${worktreeDir}`);
 
-rmSync(STATE_DIR, { recursive: true, force: true });
-log(`dev-cycle complete for ${newHash}`);
-process.exit(0);
+  rmSync(STATE_DIR, { recursive: true, force: true });
+  log(`dev-cycle complete for ${newHash}`);
+  process.exit(0);
 
 } // end of async function main()
