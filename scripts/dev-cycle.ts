@@ -353,14 +353,19 @@ async function main(): Promise<void> {
   const branch = `sync/hook-types-${newHash.slice(0, 8)}`;
   const worktreeDir = resolve("..", `claude-code-hooks-${branch.replace(/\//g, "-")}`);
 
-  const existingWorktrees = capture("git", ["worktree", "list"]).stdout;
-  if (existingWorktrees.includes(worktreeDir)) {
-    log(`reusing existing worktree at ${worktreeDir}`);
-  } else {
-    run("git", ["fetch", "origin", MAIN_BRANCH]);
-    run("git", ["worktree", "add", worktreeDir, "-b", branch, `origin/${MAIN_BRANCH}`]);
-    log(`created worktree at ${worktreeDir} on branch ${branch}`);
+  run("git", ["fetch", "origin", MAIN_BRANCH]);
+
+  // Clean up stale leftovers from previous runs before creating.
+  tryRun("git", ["worktree", "remove", worktreeDir, "--force"]);
+  tryRun("git", ["worktree", "prune"]);
+  tryRun("git", ["branch", "-D", branch]);
+  if (existsSync(worktreeDir)) {
+    rmSync(worktreeDir, { recursive: true, force: true });
+    log(`removed leftover directory ${worktreeDir}`);
   }
+
+  run("git", ["worktree", "add", worktreeDir, "-b", branch, `origin/${MAIN_BRANCH}`]);
+  log(`created worktree at ${worktreeDir} on branch ${branch}`);
   saveState("branch", branch);
   saveState("worktree", worktreeDir);
   cleanupWorktreeDir = worktreeDir;
