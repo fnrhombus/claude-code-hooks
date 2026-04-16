@@ -1,18 +1,13 @@
 import type {
-  AgentToolInput,
-  AskUserQuestionInput,
-  BashToolInput,
+  BuiltinToolInputMap,
+  BuiltinToolName,
   ConfigChangeInput,
   CwdChangedInput,
-  EditToolInput,
   ElicitationHookOutput,
   ElicitationInput,
   ElicitationResultHookOutput,
   ElicitationResultInput,
-  ExitPlanModeInput,
   FileChangedInput,
-  GlobToolInput,
-  GrepToolInput,
   HookInput,
   HookOutput,
   InstructionsLoadedInput,
@@ -30,7 +25,6 @@ import type {
   PreCompactInput,
   PreToolUseHookOutput,
   PreToolUseInput,
-  ReadToolInput,
   SessionEndInput,
   SessionStartHookOutput,
   SessionStartInput,
@@ -44,12 +38,9 @@ import type {
   TeammateIdleInput,
   UserPromptSubmitHookOutput,
   UserPromptSubmitInput,
-  WebFetchToolInput,
-  WebSearchToolInput,
   WorktreeCreateHookOutput,
   WorktreeCreateInput,
   WorktreeRemoveInput,
-  WriteToolInput,
 } from "./types.js";
 
 // ============================================================================
@@ -107,21 +98,12 @@ export type Handler<Input, Return> = (
  * PostToolUseFailure, the handler can also be an object keyed by tool name
  * whose values are tool-narrowed handlers.
  */
-export interface ToolHandlerMap<BaseInput extends { tool_name: string }, Return> {
-  Bash?: Handler<Narrow<BaseInput, BashToolInput>, Return>;
-  Edit?: Handler<Narrow<BaseInput, EditToolInput>, Return>;
-  Write?: Handler<Narrow<BaseInput, WriteToolInput>, Return>;
-  Read?: Handler<Narrow<BaseInput, ReadToolInput>, Return>;
-  Glob?: Handler<Narrow<BaseInput, GlobToolInput>, Return>;
-  Grep?: Handler<Narrow<BaseInput, GrepToolInput>, Return>;
-  WebFetch?: Handler<Narrow<BaseInput, WebFetchToolInput>, Return>;
-  WebSearch?: Handler<Narrow<BaseInput, WebSearchToolInput>, Return>;
-  Agent?: Handler<Narrow<BaseInput, AgentToolInput>, Return>;
-  AskUserQuestion?: Handler<Narrow<BaseInput, AskUserQuestionInput>, Return>;
-  ExitPlanMode?: Handler<Narrow<BaseInput, ExitPlanModeInput>, Return>;
+export type ToolHandlerMap<BaseInput extends { tool_name: string }, Return> = {
+  [K in BuiltinToolName]?: Handler<Narrow<BaseInput, BuiltinToolInputMap[K]>, Return>;
+} & {
   /** Matches any tool not handled above, including MCP tools. */
   default?: Handler<BaseInput, Return>;
-}
+};
 
 /** Utility: replace `tool_input` on BaseInput with a narrowed tool input type. */
 type Narrow<BaseInput extends { tool_name: string }, TInput> =
