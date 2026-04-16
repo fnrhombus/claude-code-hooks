@@ -1,4 +1,4 @@
-// SOURCE_SHA256: d973ccaabc400d7f632461ebff7ed1f56065f4abc09c7e49059635e52515c638
+// SOURCE_SHA256: 92859ca4d38ec855f545968baccb9208a89cf5a1678ef651ec44616820b3d0ad
 /**
  * TypeScript types for the Claude Code hook API (stdin/stdout protocol).
  *
@@ -13,6 +13,16 @@
 // Enums
 // ============================================================================
 
+/** Trigger for context compaction: user-initiated or automatic. */
+export type CompactTrigger = "manual" | "auto";
+
+/** Action for elicitation responses. Used by both Elicitation and ElicitationResult outputs. */
+export type ElicitationAction = "accept" | "decline" | "cancel";
+
+/**
+ * Current permission mode. Determines how Claude Code handles tool approvals.
+ * Not all events include this field — check each event's schema.
+ */
 export type PermissionMode =
   | "default"
   | "plan"
@@ -21,197 +31,180 @@ export type PermissionMode =
   | "dontAsk"
   | "bypassPermissions";
 
-export type HookEventName =
-  | "SessionStart"
-  | "SessionEnd"
-  | "UserPromptSubmit"
-  | "PreToolUse"
-  | "PermissionRequest"
-  | "PermissionDenied"
-  | "PostToolUse"
-  | "PostToolUseFailure"
-  | "Notification"
-  | "SubagentStart"
-  | "SubagentStop"
-  | "TaskCreated"
-  | "TaskCompleted"
-  | "Stop"
-  | "StopFailure"
-  | "TeammateIdle"
-  | "InstructionsLoaded"
-  | "ConfigChange"
-  | "CwdChanged"
-  | "FileChanged"
-  | "WorktreeCreate"
-  | "WorktreeRemove"
-  | "PreCompact"
-  | "PostCompact"
-  | "Elicitation"
-  | "ElicitationResult";
-
-export type SessionSource = "startup" | "resume" | "clear" | "compact";
-
-export type SessionEndReason =
-  | "clear"
-  | "resume"
-  | "logout"
-  | "prompt_input_exit"
-  | "bypass_permissions_disabled"
-  | "other";
-
-export type NotificationType =
-  | "permission_prompt"
-  | "idle_prompt"
-  | "auth_success"
-  | "elicitation_dialog";
-
-export type StopErrorType =
-  | "rate_limit"
-  | "authentication_failed"
-  | "billing_error"
-  | "invalid_request"
-  | "server_error"
-  | "max_output_tokens"
-  | "unknown";
-
-export type MemoryType = "User" | "Project" | "Local" | "Managed";
-
-export type LoadReason =
-  | "session_start"
-  | "nested_traversal"
-  | "path_glob_match"
-  | "include"
-  | "compact";
-
-export type ConfigSource =
-  | "user_settings"
-  | "project_settings"
-  | "local_settings"
-  | "policy_settings"
-  | "skills";
-
-export type CompactTrigger = "manual" | "auto";
-
 // ============================================================================
 // Common input fields (present on every hook event)
 // ============================================================================
 
+/** Fields present on every hook event's JSON input. */
 export interface HookInputCommon {
-  session_id: string;
-  transcript_path: string;
-  cwd: string;
-  hook_event_name: HookEventName;
-  permission_mode?: PermissionMode;
-  /** Only set when the hook is firing inside a subagent context. */
+  /** Unique identifier for the subagent. Only present when the hook fires inside a subagent call. */
   agent_id?: string;
+  /** Agent name (e.g., "Explore" or "security-reviewer"). Present when using --agent or inside a subagent. */
   agent_type?: string;
+  /** Current working directory when the hook is invoked. */
+  cwd: string;
+  /** Name of the event that fired. */
+  hook_event_name: string;
+  /** Current permission mode. Not all events include this — check each event's JSON example. */
+  permission_mode?: PermissionMode;
+  /** Current session identifier. */
+  session_id: string;
+  /** Path to conversation JSON transcript. */
+  transcript_path: string;
 }
+
+/** Shorthand for events that narrow only the event name (and optionally a few fields). */
+export type HookEvent<E extends string> = HookInputCommon & { hook_event_name: E };
+
+/** Shorthand for tool-context events that carry permission_mode, tool_use_id, and ToolCall fields. */
+type ToolEvent<E extends string> = HookEvent<E> & {
+  permission_mode: PermissionMode;
+  tool_use_id: string;
+} & ToolCall;
 
 // ============================================================================
 // Tool input schemas (tool_input shape per built-in tool)
 // ============================================================================
 
-export interface BashToolInput {
-  command: string;
+/** Input shape for the Agent tool. */
+export interface AgentToolInput {
+  /** Short description of the task. */
   description?: string;
-  /** Milliseconds. */
-  timeout?: number;
+  /** Optional model override for this agent. */
+  model?: string;
+  /** The task for the agent to perform. */
+  prompt: string;
+  /** The type of specialized agent to use. */
+  subagent_type: string;
+}
+
+/** Input shape for the AskUserQuestion tool. */
+export interface AskUserQuestionInput {
+  /** Maps question text to selected option label. Supply via updatedInput to answer programmatically. */
+  answers?: Record<string, string>;
+  /** Array of question objects to present to the user. */
+  questions: Array<{
+    header: string;
+    multiSelect?: boolean;
+    options: Array<{ label: string }>;
+    question: string;
+  }>;
+}
+
+/** Input shape for the Bash tool. */
+export interface BashToolInput {
+  /** The shell command to execute. */
+  command: string;
+  /** Description of what the command does. */
+  description?: string;
+  /** If true, run the command in the background. */
   run_in_background?: boolean;
+  /** Milliseconds before the command times out. */
+  timeout?: number;
 }
 
-export interface WriteToolInput {
-  file_path: string;
-  content: string;
-}
-
+/** Input shape for the Edit tool. */
 export interface EditToolInput {
+  /** The absolute path to the file to modify. */
   file_path: string;
-  old_string: string;
+  /** The replacement text. */
   new_string: string;
+  /** The text to find and replace. Must be unique in the file unless replace_all is true. */
+  old_string: string;
+  /** If true, replace all occurrences of old_string. */
   replace_all?: boolean;
 }
 
-export interface ReadToolInput {
-  file_path: string;
-  offset?: number;
-  limit?: number;
-}
-
-export interface GlobToolInput {
-  pattern: string;
-  path?: string;
-}
-
-export interface GrepToolInput {
-  pattern: string;
-  path?: string;
-  glob?: string;
-  type?: string;
-  output_mode?: "content" | "files_with_matches" | "count";
-  "-i"?: boolean;
-  "-n"?: boolean;
-  "-A"?: number;
-  "-B"?: number;
-  "-C"?: number;
-  multiline?: boolean;
-  head_limit?: number;
-}
-
-export interface WebFetchToolInput {
-  url: string;
-  prompt: string;
-}
-
-export interface WebSearchToolInput {
-  query: string;
-  allowed_domains?: string[];
-  blocked_domains?: string[];
-}
-
-export interface AgentToolInput {
-  prompt: string;
-  description?: string;
-  subagent_type: string;
-  model?: string;
-}
-
-export interface AskUserQuestionInput {
-  questions: Array<{
-    question: string;
-    header: string;
-    options: Array<{ label: string }>;
-    multiSelect?: boolean;
-  }>;
-  answers?: Record<string, string>;
-}
-
+/** Input shape for the ExitPlanMode tool. */
 export interface ExitPlanModeInput {
+  /** The plan text to submit. */
   plan?: string;
 }
 
+/** Input shape for the Glob tool. */
+export interface GlobToolInput {
+  /** The glob pattern to match files against. */
+  pattern: string;
+  /** The directory to search in. Defaults to cwd. */
+  path?: string;
+}
+
+/** Input shape for the Grep tool. */
+export interface GrepToolInput {
+  /** Case insensitive search. */
+  "-i"?: boolean;
+  /** Glob pattern to filter files. */
+  glob?: string;
+  /** Enable multiline mode where . matches newlines. */
+  multiline?: boolean;
+  /** Output mode: "content", "files_with_matches", or "count". */
+  output_mode?: "content" | "files_with_matches" | "count";
+  /** File or directory to search in. */
+  path?: string;
+  /** The regex pattern to search for. */
+  pattern: string;
+}
+
+/** Input shape for the Read tool. */
+export interface ReadToolInput {
+  /** The absolute path to the file to read. */
+  file_path: string;
+  /** Number of lines to read. */
+  limit?: number;
+  /** Line number to start reading from. */
+  offset?: number;
+}
+
+/** Input shape for the WebFetch tool. */
+export interface WebFetchToolInput {
+  /** Instructions for processing the fetched content. */
+  prompt: string;
+  /** The URL to fetch. */
+  url: string;
+}
+
+/** Input shape for the WebSearch tool. */
+export interface WebSearchToolInput {
+  /** Domains to allow in results. */
+  allowed_domains?: string[];
+  /** Domains to exclude from results. */
+  blocked_domains?: string[];
+  /** The search query. */
+  query: string;
+}
+
+/** Input shape for the Write tool. */
+export interface WriteToolInput {
+  /** The content to write to the file. */
+  content: string;
+  /** The absolute path to the file to write. */
+  file_path: string;
+}
+
 /**
- * Map from built-in tool name → its tool_input shape.
+ * Map from built-in tool name to its tool_input shape.
  * MCP tools follow the pattern `mcp__<server>__<tool>` and have arbitrary shapes.
  */
 export interface BuiltinToolInputMap {
-  Bash: BashToolInput;
-  Write: WriteToolInput;
-  Edit: EditToolInput;
-  Read: ReadToolInput;
-  Glob: GlobToolInput;
-  Grep: GrepToolInput;
-  WebFetch: WebFetchToolInput;
-  WebSearch: WebSearchToolInput;
   Agent: AgentToolInput;
   AskUserQuestion: AskUserQuestionInput;
+  Bash: BashToolInput;
+  Edit: EditToolInput;
   ExitPlanMode: ExitPlanModeInput;
+  Glob: GlobToolInput;
+  Grep: GrepToolInput;
+  Read: ReadToolInput;
+  WebFetch: WebFetchToolInput;
+  WebSearch: WebSearchToolInput;
+  Write: WriteToolInput;
 }
 
+/** Union of all built-in tool names. */
 export type BuiltinToolName = keyof BuiltinToolInputMap;
 
 /**
- * Discriminated union over tool_name → tool_input.
- * Falls through to `{ tool_name: string; tool_input: unknown }` for MCP tools.
+ * Discriminated union over tool_name to tool_input.
+ * Falls through to `{ tool_name: string; tool_input: Record<string, unknown> }` for MCP tools.
  */
 export type ToolCall =
   | {
@@ -226,178 +219,249 @@ export type ToolCall =
 // Per-event input types
 // ============================================================================
 
-export interface SessionStartInput extends HookInputCommon {
-  hook_event_name: "SessionStart";
-  source: SessionSource;
+/** Fired when a session begins or resumes. */
+export type SessionStartInput = HookEvent<"SessionStart"> & {
+  /** How the session started: "startup" (new), "resume" (continued), "clear" (after /clear), or "compact" (after compaction). */
+  source: "startup" | "resume" | "clear" | "compact";
+  /** The model being used for this session. */
   model: string;
+  /** Present when the session uses --agent. */
   agent_type?: string;
-}
+};
 
-export interface SessionEndInput extends HookInputCommon {
-  hook_event_name: "SessionEnd";
-  reason: SessionEndReason;
-}
-
-export interface UserPromptSubmitInput extends HookInputCommon {
-  hook_event_name: "UserPromptSubmit";
+/** Fired when you submit a prompt, before Claude processes it. */
+export type UserPromptSubmitInput = HookEvent<"UserPromptSubmit"> & {
   permission_mode: PermissionMode;
+  /** The user's prompt text. */
   prompt: string;
-}
+};
 
-export type PreToolUseInput = HookInputCommon & {
-  hook_event_name: "PreToolUse";
+/** Fired before a tool call executes. Can block, allow, modify input, or defer. */
+export type PreToolUseInput = ToolEvent<"PreToolUse">;
+
+/**
+ * A single entry in a permission update array. Discriminated on `type`.
+ * Used in PermissionRequest input (suggestions) and output (updatedPermissions).
+ */
+export type PermissionUpdateEntry =
+  | {
+      type: "addRules" | "replaceRules" | "removeRules";
+      rules: Array<{ toolName: string; ruleContent?: string }>;
+      behavior: "allow" | "deny" | "ask";
+      destination: "session" | "localSettings" | "projectSettings" | "userSettings";
+    }
+  | {
+      type: "setMode";
+      mode: PermissionMode;
+      destination: "session" | "localSettings" | "projectSettings" | "userSettings";
+    }
+  | {
+      type: "addDirectories" | "removeDirectories";
+      directories: string[];
+      destination: "session" | "localSettings" | "projectSettings" | "userSettings";
+    };
+
+/** Fired when a permission dialog appears. Hook can allow or deny on behalf of the user. */
+export type PermissionRequestInput = HookEvent<"PermissionRequest"> & {
   permission_mode: PermissionMode;
-  tool_use_id: string;
-} & ToolCall;
-
-export interface PermissionSuggestion {
-  type: "addRules";
-  rules: Array<{ toolName: string; ruleContent?: string }>;
-  behavior: "allow" | "deny" | "ask";
-  destination: "localSettings" | "projectSettings" | "userSettings";
-}
-
-export type PermissionRequestInput = HookInputCommon & {
-  hook_event_name: "PermissionRequest";
-  permission_mode: PermissionMode;
+  /** May be absent for non-tool permission prompts. */
   tool_use_id?: string;
-  permission_suggestions?: PermissionSuggestion[];
+  /** Suggested permission changes the user could apply. */
+  permission_suggestions?: PermissionUpdateEntry[];
 } & ToolCall;
 
-export type PermissionDeniedInput = HookInputCommon & {
-  hook_event_name: "PermissionDenied";
+/** Fired when a tool call is denied by the auto mode classifier. Only fires in auto mode. */
+export type PermissionDeniedInput = ToolEvent<"PermissionDenied"> & {
+  /** Always "auto" — this event only fires in auto mode. */
   permission_mode: "auto";
-  tool_use_id: string;
+  /** The classifier's explanation for why the tool call was denied. */
   reason: string;
-} & ToolCall;
+};
 
-export type PostToolUseInput = HookInputCommon & {
-  hook_event_name: "PostToolUse";
-  permission_mode: PermissionMode;
-  tool_use_id: string;
+/** Fired after a tool call succeeds. */
+export type PostToolUseInput = ToolEvent<"PostToolUse"> & {
+  /** The tool's return value. Shape varies by tool. */
   tool_response: unknown;
-} & ToolCall;
+};
 
-export type PostToolUseFailureInput = HookInputCommon & {
-  hook_event_name: "PostToolUseFailure";
-  permission_mode: PermissionMode;
-  tool_use_id: string;
+/** Fired after a tool call fails. */
+export type PostToolUseFailureInput = ToolEvent<"PostToolUseFailure"> & {
+  /** The error message from the failed tool call. */
   error: string;
+  /** True if the failure was caused by a user interrupt. */
   is_interrupt?: boolean;
-} & ToolCall;
+};
 
-export interface NotificationInput extends HookInputCommon {
-  hook_event_name: "Notification";
+/** Fired when Claude Code sends a notification. */
+export type NotificationInput = HookEvent<"Notification"> & {
+  /** The notification message text. */
   message: string;
+  /** The type of notification. */
+  notification_type: "permission_prompt" | "idle_prompt" | "auth_success" | "elicitation_dialog";
+  /** Optional title for the notification. */
   title?: string;
-  notification_type: NotificationType;
-}
+};
 
-export interface SubagentStartInput extends HookInputCommon {
-  hook_event_name: "SubagentStart";
+/** Fired when a subagent is spawned. */
+export type SubagentStartInput = HookEvent<"SubagentStart"> & {
   agent_id: string;
   agent_type: string;
-}
+};
 
-export interface SubagentStopInput extends HookInputCommon {
-  hook_event_name: "SubagentStop";
-  permission_mode: PermissionMode;
-  stop_hook_active: boolean;
+/** Fired when a subagent finishes. */
+export type SubagentStopInput = HookEvent<"SubagentStop"> & {
   agent_id: string;
-  agent_type: string;
   agent_transcript_path: string;
+  agent_type: string;
   last_assistant_message: string;
-}
+  permission_mode: PermissionMode;
+  /** True when Claude Code is already continuing as a result of a stop hook. */
+  stop_hook_active: boolean;
+};
 
-export interface TaskCreatedInput extends HookInputCommon {
-  hook_event_name: "TaskCreated";
+/** Shared fields for TaskCreated and TaskCompleted events. */
+interface TaskFields {
   permission_mode: PermissionMode;
   task_id: string;
   task_subject: string;
   task_description?: string;
-  teammate_name?: string;
   team_name?: string;
-}
-
-export interface TaskCompletedInput extends HookInputCommon {
-  hook_event_name: "TaskCompleted";
-  permission_mode: PermissionMode;
-  task_id: string;
-  task_subject: string;
-  task_description?: string;
   teammate_name?: string;
-  team_name?: string;
 }
 
-export interface StopInput extends HookInputCommon {
-  hook_event_name: "Stop";
-  permission_mode: PermissionMode;
-}
+/** Fired when a task is being created via TaskCreate. */
+export type TaskCreatedInput = HookEvent<"TaskCreated"> & TaskFields;
 
-export interface StopFailureInput extends HookInputCommon {
-  hook_event_name: "StopFailure";
-  permission_mode: PermissionMode;
-  error_type: StopErrorType;
-}
+/** Fired when a task is being marked as completed. */
+export type TaskCompletedInput = HookEvent<"TaskCompleted"> & TaskFields;
 
-export interface TeammateIdleInput extends HookInputCommon {
-  hook_event_name: "TeammateIdle";
+/** Fired when Claude finishes responding. Can block to force continuation. */
+export type StopInput = HookEvent<"Stop"> & {
+  /** The last message Claude generated. */
+  last_assistant_message: string;
   permission_mode: PermissionMode;
-  teammate_name: string;
+  /** True when Claude Code is already continuing as a result of a stop hook. */
+  stop_hook_active: boolean;
+};
+
+/** Fired when the turn ends due to an API error. Output and exit code are ignored. */
+export type StopFailureInput = HookEvent<"StopFailure"> & {
+  /** The error type. */
+  error: "rate_limit" | "authentication_failed" | "billing_error" | "invalid_request" | "server_error" | "max_output_tokens" | "unknown";
+  /** Additional details about the error. */
+  error_details?: string;
+  /** Contains the API error string shown in the conversation. */
+  last_assistant_message?: string;
+};
+
+/** Fired when an agent team teammate is about to go idle. */
+export type TeammateIdleInput = HookEvent<"TeammateIdle"> & {
+  permission_mode: PermissionMode;
   team_name: string;
-}
+  teammate_name: string;
+};
 
-export interface InstructionsLoadedInput extends HookInputCommon {
-  hook_event_name: "InstructionsLoaded";
+/** Fired when a CLAUDE.md or .claude/rules/*.md file is loaded into context. */
+export type InstructionsLoadedInput = HookEvent<"InstructionsLoaded"> & {
+  /** Path to the instructions file that was loaded. */
   file_path: string;
-  memory_type: MemoryType;
-  load_reason: LoadReason;
+  /** Why this file was loaded. */
+  load_reason: "session_start" | "nested_traversal" | "path_glob_match" | "include" | "compact";
+  /** What kind of instructions file this is. */
+  memory_type: "User" | "Project" | "Local" | "Managed";
+  /** Present only for path_glob_match loads — the glob patterns that matched. */
   globs?: string[];
-  trigger_file_path?: string;
+  /** Path to the parent instruction file that included this one, for include loads. */
   parent_file_path?: string;
-}
+  /** Path to the file whose access triggered this load, for lazy loads. */
+  trigger_file_path?: string;
+};
 
-export interface ConfigChangeInput extends HookInputCommon {
-  hook_event_name: "ConfigChange";
-  config_source: ConfigSource;
-}
+/** Fired when a configuration file changes during a session. */
+export type ConfigChangeInput = HookEvent<"ConfigChange"> & {
+  /** Which configuration source changed. */
+  source: "user_settings" | "project_settings" | "local_settings" | "policy_settings" | "skills";
+  /** Path to the changed configuration file. */
+  file_path?: string;
+};
 
-export interface CwdChangedInput extends HookInputCommon {
-  hook_event_name: "CwdChanged";
-}
+/** Fired when the working directory changes (e.g., Claude executes a `cd` command). */
+export type CwdChangedInput = HookEvent<"CwdChanged"> & {
+  new_cwd: string;
+  old_cwd: string;
+};
 
-export interface FileChangedInput extends HookInputCommon {
-  hook_event_name: "FileChanged";
+/** Fired when a watched file changes on disk. The matcher field specifies which filenames to watch. */
+export type FileChangedInput = HookEvent<"FileChanged"> & {
+  /** What kind of file system event occurred. */
+  event: "change" | "add" | "unlink";
+  /** Path to the changed file. */
   file_path: string;
-}
+};
 
-export interface WorktreeCreateInput extends HookInputCommon {
-  hook_event_name: "WorktreeCreate";
-}
+/** Fired when a worktree is being created. Hook must return the worktree path. */
+export type WorktreeCreateInput = HookEvent<"WorktreeCreate"> & {
+  /** Slug identifier for the new worktree, either user-specified or auto-generated. */
+  name: string;
+};
 
-export interface WorktreeRemoveInput extends HookInputCommon {
-  hook_event_name: "WorktreeRemove";
-}
+/** Fired when a worktree is being removed. */
+export type WorktreeRemoveInput = HookEvent<"WorktreeRemove"> & {
+  /** Absolute path to the worktree being removed. */
+  worktree_path: string;
+};
 
-export interface PreCompactInput extends HookInputCommon {
-  hook_event_name: "PreCompact";
+/** Fired before context compaction. Can block to prevent compaction. */
+export type PreCompactInput = HookEvent<"PreCompact"> & {
+  /** For manual compaction, contains what the user passed to /compact. Empty for auto. */
+  custom_instructions: string;
   trigger: CompactTrigger;
-}
+};
 
-export interface PostCompactInput extends HookInputCommon {
-  hook_event_name: "PostCompact";
+/** Fired after context compaction completes. */
+export type PostCompactInput = HookEvent<"PostCompact"> & {
+  /** The summary generated by compaction. */
+  compact_summary: string;
   trigger: CompactTrigger;
-}
+};
 
-export interface ElicitationInput extends HookInputCommon {
-  hook_event_name: "Elicitation";
+/** Fired when an MCP server requests user input during a tool call. */
+export type ElicitationInput = HookEvent<"Elicitation"> & {
+  /** Unique identifier for this elicitation request. */
+  elicitation_id?: string;
+  /** The message shown to the user. */
+  message: string;
+  /** The MCP server that triggered this elicitation. */
   mcp_server_name: string;
-}
+  /** The elicitation mode: "form" or "url". */
+  mode?: string;
+  permission_mode: PermissionMode;
+  /** Form schema for form-mode elicitation. */
+  requested_schema?: Record<string, unknown>;
+  /** Only present for url-mode elicitation. */
+  url?: string;
+};
 
-export interface ElicitationResultInput extends HookInputCommon {
-  hook_event_name: "ElicitationResult";
+/** Fired after a user responds to an MCP elicitation, before the response is sent back to the server. */
+export type ElicitationResultInput = HookEvent<"ElicitationResult"> & {
+  /** The user's chosen action. */
+  action: ElicitationAction;
+  /** Form field values the user submitted. Only present when action is "accept". */
+  content?: Record<string, unknown>;
+  /** Unique identifier for this elicitation request. */
+  elicitation_id?: string;
+  /** The MCP server this elicitation is for. */
   mcp_server_name: string;
-}
+  /** The elicitation mode. */
+  mode?: string;
+  permission_mode: PermissionMode;
+};
+
+/** Fired when a session terminates. */
+export type SessionEndInput = HookEvent<"SessionEnd"> & {
+  /** Why the session ended. */
+  reason: "clear" | "resume" | "logout" | "prompt_input_exit" | "bypass_permissions_disabled" | "other";
+};
 
 /**
  * Discriminated union of every possible hook stdin payload.
@@ -405,7 +469,6 @@ export interface ElicitationResultInput extends HookInputCommon {
  */
 export type HookInput =
   | SessionStartInput
-  | SessionEndInput
   | UserPromptSubmitInput
   | PreToolUseInput
   | PermissionRequestInput
@@ -429,124 +492,160 @@ export type HookInput =
   | PreCompactInput
   | PostCompactInput
   | ElicitationInput
-  | ElicitationResultInput;
+  | ElicitationResultInput
+  | SessionEndInput;
+
+/** Derived from the HookInput union — add a new *Input type and this updates automatically. */
+export type HookEventName = HookInput["hook_event_name"];
 
 // ============================================================================
 // Hook output schema (stdout JSON)
 // ============================================================================
 
-export type PermissionDecision = "allow" | "deny" | "ask" | "defer";
+/** Shorthand for hook output types that narrow only the event name. */
+type HookEventOutput<E extends string> = { hookEventName: E };
 
-export interface PreToolUseHookOutput {
-  hookEventName: "PreToolUse";
-  permissionDecision?: PermissionDecision;
+/** Shared shape for outputs that only carry additionalContext. */
+type ContextOnlyOutput<E extends string> = HookEventOutput<E> & {
+  /** Extra text injected into Claude's context after the tool result. */
+  additionalContext?: string;
+};
+
+/** Shared shape for outputs that carry additionalContext + sessionTitle. */
+type SessionOutput<E extends string> = ContextOnlyOutput<E> & {
+  /** Set the session title (like /rename). */
+  sessionTitle?: string;
+};
+
+/** Shared shape for elicitation outputs. */
+type ElicitationOutput<E extends string> = HookEventOutput<E> & {
+  /** Whether to accept, decline, or cancel the elicitation. */
+  action?: ElicitationAction;
+  /** Form field values. Only used when action is "accept". */
+  content?: Record<string, unknown>;
+};
+
+/** Output for SessionStart hooks. */
+export type SessionStartHookOutput = SessionOutput<"SessionStart">;
+
+/** Output for UserPromptSubmit hooks. */
+export type UserPromptSubmitHookOutput = SessionOutput<"UserPromptSubmit">;
+
+/** Output for PreToolUse hooks. Controls whether the tool call proceeds. */
+export type PreToolUseHookOutput = ContextOnlyOutput<"PreToolUse"> & {
+  /** The decision: "allow", "deny", "ask" (escalate to user), or "defer" (pause session). */
+  permissionDecision?: "allow" | "deny" | "ask" | "defer";
+  /** Explanation shown to Claude (deny/ask) or logged (allow/defer). */
   permissionDecisionReason?: string;
   /** Replaces the entire tool_input Claude generated. */
   updatedInput?: Record<string, unknown>;
-  additionalContext?: string;
-}
+};
 
+/**
+ * Decision object for PermissionRequest hooks.
+ * Allows or denies the permission request, optionally modifying input or applying permission rules.
+ */
 export interface PermissionRequestDecision {
+  /** Whether to allow or deny the permission request. */
   behavior: "allow" | "deny";
-  updatedInput?: Record<string, unknown>;
-  updatedPermissions?: Array<{
-    type:
-      | "addRules"
-      | "replaceRules"
-      | "removeRules"
-      | "setMode"
-      | "addDirectories"
-      | "removeDirectories";
-    rules?: Array<{ toolName: string; ruleContent?: string }>;
-    behavior?: "allow" | "deny" | "ask";
-    mode?: PermissionMode;
-    directories?: string[];
-    destination:
-      | "session"
-      | "localSettings"
-      | "projectSettings"
-      | "userSettings";
-  }>;
-  message?: string;
+  /** For "deny" only: if true, stops Claude entirely. */
   interrupt?: boolean;
+  /** For "deny" only: tells Claude why the permission was denied. */
+  message?: string;
+  /** For "allow" only: replaces the entire tool_input object. */
+  updatedInput?: Record<string, unknown>;
+  /** For "allow" only: permission rule changes to apply so the user isn't prompted again. */
+  updatedPermissions?: PermissionUpdateEntry[];
 }
 
-export interface PermissionRequestHookOutput {
-  hookEventName: "PermissionRequest";
+/** Output for PermissionRequest hooks. */
+export type PermissionRequestHookOutput = HookEventOutput<"PermissionRequest"> & {
+  /** The permission decision. */
   decision?: PermissionRequestDecision;
-}
+};
 
-export interface PostToolUseHookOutput {
-  hookEventName: "PostToolUse";
-  additionalContext?: string;
-  /** MCP tools only — replaces the tool_response. */
-  updatedMCPToolOutput?: unknown;
-}
-
-export interface PostToolUseFailureHookOutput {
-  hookEventName: "PostToolUseFailure";
-  additionalContext?: string;
-}
-
-export interface PermissionDeniedHookOutput {
-  hookEventName: "PermissionDenied";
-  /** true = tell the model it may retry. */
+/** Output for PermissionDenied hooks. */
+export type PermissionDeniedHookOutput = HookEventOutput<"PermissionDenied"> & {
+  /** If true, tells the model it may retry the denied tool call. */
   retry?: boolean;
-}
+};
 
-export interface UserPromptSubmitHookOutput {
-  hookEventName: "UserPromptSubmit";
-  additionalContext?: string;
-  sessionTitle?: string;
-}
+/** Output for PostToolUse hooks. */
+export type PostToolUseHookOutput = ContextOnlyOutput<"PostToolUse"> & {
+  /** MCP tools only — replaces the tool_response returned to Claude. */
+  updatedMCPToolOutput?: unknown;
+};
 
-export interface SessionStartHookOutput {
-  hookEventName: "SessionStart";
-  additionalContext?: string;
-  sessionTitle?: string;
-}
+/** Output for PostToolUseFailure hooks. */
+export type PostToolUseFailureHookOutput = ContextOnlyOutput<"PostToolUseFailure">;
 
-export interface SubagentStartHookOutput {
-  hookEventName: "SubagentStart";
-  additionalContext?: string;
-}
+/** Output for Notification hooks. */
+export type NotificationHookOutput = ContextOnlyOutput<"Notification">;
 
-export interface NotificationHookOutput {
-  hookEventName: "Notification";
-  additionalContext?: string;
-}
+/** Output for SubagentStart hooks. */
+export type SubagentStartHookOutput = ContextOnlyOutput<"SubagentStart">;
 
-export interface WorktreeCreateHookOutput {
-  hookEventName: "WorktreeCreate";
-  /** HTTP hooks return path here; command hooks print to stdout instead. */
+/** Output for CwdChanged hooks. */
+export type CwdChangedHookOutput = HookEventOutput<"CwdChanged"> & {
+  /** Replaces the current dynamic watch list for FileChanged. Returning [] clears the list. */
+  watchPaths?: string[];
+};
+
+/** Output for FileChanged hooks. */
+export type FileChangedHookOutput = HookEventOutput<"FileChanged"> & {
+  /** Replaces the current dynamic watch list. */
+  watchPaths?: string[];
+};
+
+/** Output for WorktreeCreate hooks. */
+export type WorktreeCreateHookOutput = HookEventOutput<"WorktreeCreate"> & {
+  /** HTTP hooks return the absolute worktree path here; command hooks print to stdout instead. */
   worktreePath?: string;
-}
+};
 
-export interface ElicitationHookOutput {
-  hookEventName: "Elicitation";
-  action?: "accept" | "decline" | "cancel";
-  content?: Record<string, unknown>;
-}
+/** Output for Elicitation hooks. */
+export type ElicitationHookOutput = ElicitationOutput<"Elicitation">;
 
-export interface ElicitationResultHookOutput {
-  hookEventName: "ElicitationResult";
-  action?: "accept" | "decline" | "cancel";
-  content?: Record<string, unknown>;
-}
+/** Output for ElicitationResult hooks. */
+export type ElicitationResultHookOutput = ElicitationOutput<"ElicitationResult">;
 
+/** Union of all event-specific hook output types. */
 export type HookSpecificOutput =
+  | SessionStartHookOutput
+  | UserPromptSubmitHookOutput
   | PreToolUseHookOutput
   | PermissionRequestHookOutput
+  | PermissionDeniedHookOutput
   | PostToolUseHookOutput
   | PostToolUseFailureHookOutput
-  | PermissionDeniedHookOutput
-  | UserPromptSubmitHookOutput
-  | SessionStartHookOutput
-  | SubagentStartHookOutput
   | NotificationHookOutput
+  | SubagentStartHookOutput
+  | CwdChangedHookOutput
+  | FileChangedHookOutput
   | WorktreeCreateHookOutput
   | ElicitationHookOutput
   | ElicitationResultHookOutput;
+
+/**
+ * Map from event name to its hook-specific output type.
+ * Events not listed here have no event-specific output (only universal HookOutput fields).
+ */
+export interface HookOutputMap {
+  SessionStart: SessionStartHookOutput;
+  UserPromptSubmit: UserPromptSubmitHookOutput;
+  PreToolUse: PreToolUseHookOutput;
+  PermissionRequest: PermissionRequestHookOutput;
+  PermissionDenied: PermissionDeniedHookOutput;
+  PostToolUse: PostToolUseHookOutput;
+  PostToolUseFailure: PostToolUseFailureHookOutput;
+  Notification: NotificationHookOutput;
+  SubagentStart: SubagentStartHookOutput;
+  CwdChanged: CwdChangedHookOutput;
+  FileChanged: FileChangedHookOutput;
+  WorktreeCreate: WorktreeCreateHookOutput;
+  Elicitation: ElicitationHookOutput;
+  ElicitationResult: ElicitationResultHookOutput;
+}
 
 /**
  * Root JSON object written to stdout.
@@ -555,38 +654,41 @@ export type HookSpecificOutput =
 export interface HookOutput {
   /** Default true. If false, Claude halts execution entirely. */
   continue?: boolean;
-  /** Shown when `continue: false`. */
+  /**
+   * Top-level block decision. Supported by:
+   * UserPromptSubmit, PostToolUse, PostToolUseFailure, Stop, SubagentStop, ConfigChange, PreCompact.
+   */
+  decision?: "block";
+  /** Event-specific output. Requires a hookEventName field matching the event. */
+  hookSpecificOutput?: HookSpecificOutput;
+  /** Shown with `decision: "block"`. */
+  reason?: string;
+  /** Shown when `continue: false`. Not shown to Claude. */
   stopReason?: string;
   /** Suppress stdout from the debug log. */
   suppressOutput?: boolean;
   /** Warning message shown to the user. */
   systemMessage?: string;
-  /**
-   * Event-specific top-level block decision. Supported by:
-   * UserPromptSubmit, PostToolUse, PostToolUseFailure, Stop, SubagentStop, ConfigChange.
-   */
-  decision?: "block";
-  /** Shown with `decision: "block"`. */
-  reason?: string;
-  hookSpecificOutput?: HookSpecificOutput;
 }
 
 // ============================================================================
 // Plugin/hook environment variables
 // ============================================================================
 
+/** Environment variables available to hook commands. */
 export interface HookEnv {
-  /** Project root. Quote for paths with spaces. */
-  CLAUDE_PROJECT_DIR?: string;
-  /** Plugin install dir (changes on updates). */
-  CLAUDE_PLUGIN_ROOT?: string;
-  /** Plugin persistent data dir (survives updates). */
-  CLAUDE_PLUGIN_DATA?: string;
-  /**
-   * SessionStart, CwdChanged, FileChanged only.
-   * Path to a file where the hook can write `export VAR=value` lines to persist env.
-   */
-  CLAUDE_ENV_FILE?: string;
-  /** "true" in web environment; unset locally. */
+  /** Log level for debugging. */
+  CLAUDE_CODE_DEBUG_LOG_LEVEL?: string;
+  /** "true" in web/remote environment; unset locally. */
   CLAUDE_CODE_REMOTE?: "true";
+  /** Milliseconds. Overrides the SessionEnd hooks timeout budget. */
+  CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS?: string;
+  /** SessionStart, CwdChanged, FileChanged only. Write `export VAR=value` lines here to persist env vars. */
+  CLAUDE_ENV_FILE?: string;
+  /** Plugin persistent data dir (survives plugin updates). */
+  CLAUDE_PLUGIN_DATA?: string;
+  /** Plugin install dir (changes on plugin updates). */
+  CLAUDE_PLUGIN_ROOT?: string;
+  /** Project root. Wrap in quotes to handle paths with spaces. */
+  CLAUDE_PROJECT_DIR?: string;
 }

@@ -69,7 +69,7 @@ Read `/tmp/hooks-src.md` in full. From its content, produce `packages/core/src/t
 - `HookEvent<E>` generic: for events with ≤2 extra fields, use `export type FooInput = HookEvent<"Foo"> & { field: Type };` instead of a full interface. For events with zero extra fields, use `export type FooInput = HookEvent<"Foo">;`
 - Events with 3+ extra fields: use a full `export interface FooInput extends HookInputCommon { ... }`.
 - When two events share identical fields (differing only in `hook_event_name`), extract a shared `interface FooFields { ... }` (not exported) and intersect: `export type FooCreatedInput = HookEvent<"FooCreated"> & FooFields;`
-- Tool-context events (`PreToolUse`, `PostToolUse`, etc.) use `HookInputCommon & { ... } & ToolCall` — not `HookEvent<E>` (different pattern).
+- Tool-context events (`PreToolUse`, `PostToolUse`, etc.) use `ToolEvent<E>`: `type ToolEvent<E extends string> = HookEvent<E> & { permission_mode: PermissionMode; tool_use_id: string } & ToolCall;` Declare this helper right after `HookEvent<E>`. Events that override `tool_use_id` optionality (e.g., PermissionRequest) or narrow `permission_mode` (e.g., PermissionDenied) use `HookEvent<E> & { ... } & ToolCall` directly instead.
 
 *Output types:*
 - `HookEventOutput<E>` generic: `type HookEventOutput<E extends string> = { hookEventName: E };`

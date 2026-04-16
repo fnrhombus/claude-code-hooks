@@ -62,6 +62,8 @@ const postBash = (command: string): PostToolUseInput => ({
 const stop = (): StopInput => ({
   ...baseInput,
   hook_event_name: "Stop",
+  last_assistant_message: "Done.",
+  stop_hook_active: false,
 });
 
 // ----------------------------------------------------------------------------

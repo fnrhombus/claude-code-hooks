@@ -30,7 +30,7 @@ import type {
   UserPromptSubmitInput,
   WorktreeCreateInput,
   WorktreeRemoveInput,
-} from "./types2.js";
+} from "./types.js";
 
 // ============================================================================
 // Handler return shapes (one per event)
