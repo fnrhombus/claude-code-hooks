@@ -76,11 +76,8 @@ export type WorktreeCreateReturn = HookReturn<WorktreeCreateHookOutput>;
 export type ElicitationReturn = HookReturn<ElicitationHookOutput>;
 export type ElicitationResultReturn = HookReturn<ElicitationResultHookOutput>;
 
-/** Events without event-specific output fields still accept universal fields. */
-export type StopReturn = UniversalReturn & { block?: string };
-export type SubagentStopReturn = UniversalReturn & { block?: string };
-export type ConfigChangeReturn = UniversalReturn & { block?: string };
-export type GenericReturn = UniversalReturn;
+/** Events that support `decision: "block"` but have no event-specific output fields. */
+export type BlockableReturn = UniversalReturn & { block?: string };
 
 /** A handler return is the event shape, `void`, or `undefined` (= no-op). */
 export type MaybeReturn<T> = T | void | undefined;
@@ -111,25 +108,10 @@ type Narrow<BaseInput extends { tool_name: string }, TInput> =
     ? Omit<BaseInput, "tool_input"> & { tool_input: TInput }
     : BaseInput;
 
-export type PreToolUseHandler =
-  | Handler<PreToolUseInput, PreToolUseReturn>
-  | ToolHandlerMap<PreToolUseInput, PreToolUseReturn>;
-
-export type PostToolUseHandler =
-  | Handler<PostToolUseInput, PostToolUseReturn>
-  | ToolHandlerMap<PostToolUseInput, PostToolUseReturn>;
-
-export type PermissionRequestHandler =
-  | Handler<PermissionRequestInput, PermissionRequestReturn>
-  | ToolHandlerMap<PermissionRequestInput, PermissionRequestReturn>;
-
-export type PermissionDeniedHandler =
-  | Handler<PermissionDeniedInput, PermissionDeniedReturn>
-  | ToolHandlerMap<PermissionDeniedInput, PermissionDeniedReturn>;
-
-export type PostToolUseFailureHandler =
-  | Handler<PostToolUseFailureInput, PostToolUseFailureReturn>
-  | ToolHandlerMap<PostToolUseFailureInput, PostToolUseFailureReturn>;
+/** Handler or tool-keyed handler map for events that carry tool context. */
+type ToolAwareHandler<I extends { tool_name: string }, R> =
+  | Handler<I, R>
+  | ToolHandlerMap<I, R>;
 
 // ============================================================================
 // runHook — dispatch object keyed by event
@@ -137,29 +119,29 @@ export type PostToolUseFailureHandler =
 
 export interface HookHandlers {
   sessionStart?: Handler<SessionStartInput, SessionStartReturn>;
-  sessionEnd?: Handler<SessionEndInput, GenericReturn>;
+  sessionEnd?: Handler<SessionEndInput, UniversalReturn>;
   userPromptSubmit?: Handler<UserPromptSubmitInput, UserPromptSubmitReturn>;
-  preToolUse?: PreToolUseHandler;
-  permissionRequest?: PermissionRequestHandler;
-  permissionDenied?: PermissionDeniedHandler;
-  postToolUse?: PostToolUseHandler;
-  postToolUseFailure?: PostToolUseFailureHandler;
+  preToolUse?: ToolAwareHandler<PreToolUseInput, PreToolUseReturn>;
+  permissionRequest?: ToolAwareHandler<PermissionRequestInput, PermissionRequestReturn>;
+  permissionDenied?: ToolAwareHandler<PermissionDeniedInput, PermissionDeniedReturn>;
+  postToolUse?: ToolAwareHandler<PostToolUseInput, PostToolUseReturn>;
+  postToolUseFailure?: ToolAwareHandler<PostToolUseFailureInput, PostToolUseFailureReturn>;
   notification?: Handler<NotificationInput, NotificationReturn>;
   subagentStart?: Handler<SubagentStartInput, SubagentStartReturn>;
-  subagentStop?: Handler<SubagentStopInput, SubagentStopReturn>;
-  taskCreated?: Handler<TaskCreatedInput, GenericReturn>;
-  taskCompleted?: Handler<TaskCompletedInput, GenericReturn>;
-  stop?: Handler<StopInput, StopReturn>;
-  stopFailure?: Handler<StopFailureInput, GenericReturn>;
-  teammateIdle?: Handler<TeammateIdleInput, GenericReturn>;
-  instructionsLoaded?: Handler<InstructionsLoadedInput, GenericReturn>;
-  configChange?: Handler<ConfigChangeInput, ConfigChangeReturn>;
-  cwdChanged?: Handler<CwdChangedInput, GenericReturn>;
-  fileChanged?: Handler<FileChangedInput, GenericReturn>;
+  subagentStop?: Handler<SubagentStopInput, BlockableReturn>;
+  taskCreated?: Handler<TaskCreatedInput, UniversalReturn>;
+  taskCompleted?: Handler<TaskCompletedInput, UniversalReturn>;
+  stop?: Handler<StopInput, BlockableReturn>;
+  stopFailure?: Handler<StopFailureInput, UniversalReturn>;
+  teammateIdle?: Handler<TeammateIdleInput, UniversalReturn>;
+  instructionsLoaded?: Handler<InstructionsLoadedInput, UniversalReturn>;
+  configChange?: Handler<ConfigChangeInput, BlockableReturn>;
+  cwdChanged?: Handler<CwdChangedInput, UniversalReturn>;
+  fileChanged?: Handler<FileChangedInput, UniversalReturn>;
   worktreeCreate?: Handler<WorktreeCreateInput, WorktreeCreateReturn>;
-  worktreeRemove?: Handler<WorktreeRemoveInput, GenericReturn>;
-  preCompact?: Handler<PreCompactInput, GenericReturn>;
-  postCompact?: Handler<PostCompactInput, GenericReturn>;
+  worktreeRemove?: Handler<WorktreeRemoveInput, UniversalReturn>;
+  preCompact?: Handler<PreCompactInput, UniversalReturn>;
+  postCompact?: Handler<PostCompactInput, UniversalReturn>;
   elicitation?: Handler<ElicitationInput, ElicitationReturn>;
   elicitationResult?: Handler<ElicitationResultInput, ElicitationResultReturn>;
 }
