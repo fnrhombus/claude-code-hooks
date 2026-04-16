@@ -21,33 +21,8 @@ export type PermissionMode =
   | "dontAsk"
   | "bypassPermissions";
 
-export type HookEventName =
-  | "SessionStart"
-  | "SessionEnd"
-  | "UserPromptSubmit"
-  | "PreToolUse"
-  | "PermissionRequest"
-  | "PermissionDenied"
-  | "PostToolUse"
-  | "PostToolUseFailure"
-  | "Notification"
-  | "SubagentStart"
-  | "SubagentStop"
-  | "TaskCreated"
-  | "TaskCompleted"
-  | "Stop"
-  | "StopFailure"
-  | "TeammateIdle"
-  | "InstructionsLoaded"
-  | "ConfigChange"
-  | "CwdChanged"
-  | "FileChanged"
-  | "WorktreeCreate"
-  | "WorktreeRemove"
-  | "PreCompact"
-  | "PostCompact"
-  | "Elicitation"
-  | "ElicitationResult";
+/** Derived from the HookInput union — add a new *Input type and this updates automatically. */
+export type HookEventName = HookInput["hook_event_name"];
 
 export type SessionSource = "startup" | "resume" | "clear" | "compact";
 
@@ -100,12 +75,18 @@ export interface HookInputCommon {
   session_id: string;
   transcript_path: string;
   cwd: string;
-  hook_event_name: HookEventName;
+  hook_event_name: string;
   permission_mode?: PermissionMode;
   /** Only set when the hook is firing inside a subagent context. */
   agent_id?: string;
   agent_type?: string;
 }
+
+/** Shorthand for events that narrow only the event name (and optionally a few fields). */
+export type HookEvent<E extends string> = HookInputCommon & { hook_event_name: E };
+
+/** Shorthand for tool-context events (PreToolUse, PostToolUse, etc.). */
+type ToolEvent<E extends string> = HookEvent<E> & { permission_mode: PermissionMode; tool_use_id: string } & ToolCall;
 
 // ============================================================================
 // Tool input schemas (tool_input shape per built-in tool)
@@ -226,29 +207,20 @@ export type ToolCall =
 // Per-event input types
 // ============================================================================
 
-export interface SessionStartInput extends HookInputCommon {
-  hook_event_name: "SessionStart";
+export type SessionStartInput = HookEvent<"SessionStart"> & {
   source: SessionSource;
   model: string;
   agent_type?: string;
-}
+};
 
-export interface SessionEndInput extends HookInputCommon {
-  hook_event_name: "SessionEnd";
-  reason: SessionEndReason;
-}
+export type SessionEndInput = HookEvent<"SessionEnd"> & { reason: SessionEndReason };
 
-export interface UserPromptSubmitInput extends HookInputCommon {
-  hook_event_name: "UserPromptSubmit";
+export type UserPromptSubmitInput = HookEvent<"UserPromptSubmit"> & {
   permission_mode: PermissionMode;
   prompt: string;
-}
+};
 
-export type PreToolUseInput = HookInputCommon & {
-  hook_event_name: "PreToolUse";
-  permission_mode: PermissionMode;
-  tool_use_id: string;
-} & ToolCall;
+export type PreToolUseInput = ToolEvent<"PreToolUse">;
 
 export interface PermissionSuggestion {
   type: "addRules";
@@ -257,60 +229,45 @@ export interface PermissionSuggestion {
   destination: "localSettings" | "projectSettings" | "userSettings";
 }
 
-export type PermissionRequestInput = HookInputCommon & {
-  hook_event_name: "PermissionRequest";
+export type PermissionRequestInput = HookEvent<"PermissionRequest"> & {
   permission_mode: PermissionMode;
   tool_use_id?: string;
   permission_suggestions?: PermissionSuggestion[];
 } & ToolCall;
 
-export type PermissionDeniedInput = HookInputCommon & {
-  hook_event_name: "PermissionDenied";
+export type PermissionDeniedInput = ToolEvent<"PermissionDenied"> & {
   permission_mode: "auto";
-  tool_use_id: string;
   reason: string;
-} & ToolCall;
+};
 
-export type PostToolUseInput = HookInputCommon & {
-  hook_event_name: "PostToolUse";
-  permission_mode: PermissionMode;
-  tool_use_id: string;
-  tool_response: unknown;
-} & ToolCall;
+export type PostToolUseInput = ToolEvent<"PostToolUse"> & { tool_response: unknown };
 
-export type PostToolUseFailureInput = HookInputCommon & {
-  hook_event_name: "PostToolUseFailure";
-  permission_mode: PermissionMode;
-  tool_use_id: string;
+export type PostToolUseFailureInput = ToolEvent<"PostToolUseFailure"> & {
   error: string;
   is_interrupt?: boolean;
-} & ToolCall;
+};
 
-export interface NotificationInput extends HookInputCommon {
-  hook_event_name: "Notification";
+export type NotificationInput = HookEvent<"Notification"> & {
   message: string;
   title?: string;
   notification_type: NotificationType;
-}
+};
 
-export interface SubagentStartInput extends HookInputCommon {
-  hook_event_name: "SubagentStart";
+export type SubagentStartInput = HookEvent<"SubagentStart"> & {
   agent_id: string;
   agent_type: string;
-}
+};
 
-export interface SubagentStopInput extends HookInputCommon {
-  hook_event_name: "SubagentStop";
+export type SubagentStopInput = HookEvent<"SubagentStop"> & {
   permission_mode: PermissionMode;
   stop_hook_active: boolean;
   agent_id: string;
   agent_type: string;
   agent_transcript_path: string;
   last_assistant_message: string;
-}
+};
 
-export interface TaskCreatedInput extends HookInputCommon {
-  hook_event_name: "TaskCreated";
+interface TaskFields {
   permission_mode: PermissionMode;
   task_id: string;
   task_subject: string;
@@ -319,85 +276,42 @@ export interface TaskCreatedInput extends HookInputCommon {
   team_name?: string;
 }
 
-export interface TaskCompletedInput extends HookInputCommon {
-  hook_event_name: "TaskCompleted";
-  permission_mode: PermissionMode;
-  task_id: string;
-  task_subject: string;
-  task_description?: string;
-  teammate_name?: string;
-  team_name?: string;
-}
+export type TaskCreatedInput = HookEvent<"TaskCreated"> & TaskFields;
+export type TaskCompletedInput = HookEvent<"TaskCompleted"> & TaskFields;
 
-export interface StopInput extends HookInputCommon {
-  hook_event_name: "Stop";
-  permission_mode: PermissionMode;
-}
+export type StopInput = HookEvent<"Stop"> & { permission_mode: PermissionMode };
 
-export interface StopFailureInput extends HookInputCommon {
-  hook_event_name: "StopFailure";
+export type StopFailureInput = HookEvent<"StopFailure"> & {
   permission_mode: PermissionMode;
   error_type: StopErrorType;
-}
+};
 
-export interface TeammateIdleInput extends HookInputCommon {
-  hook_event_name: "TeammateIdle";
+export type TeammateIdleInput = HookEvent<"TeammateIdle"> & {
   permission_mode: PermissionMode;
   teammate_name: string;
   team_name: string;
-}
+};
 
-export interface InstructionsLoadedInput extends HookInputCommon {
-  hook_event_name: "InstructionsLoaded";
+export type InstructionsLoadedInput = HookEvent<"InstructionsLoaded"> & {
   file_path: string;
   memory_type: MemoryType;
   load_reason: LoadReason;
   globs?: string[];
   trigger_file_path?: string;
   parent_file_path?: string;
-}
+};
 
-export interface ConfigChangeInput extends HookInputCommon {
-  hook_event_name: "ConfigChange";
-  config_source: ConfigSource;
-}
+export type ConfigChangeInput = HookEvent<"ConfigChange"> & { config_source: ConfigSource };
 
-export interface CwdChangedInput extends HookInputCommon {
-  hook_event_name: "CwdChanged";
-}
+export type CwdChangedInput = HookEvent<"CwdChanged">;
+export type FileChangedInput = HookEvent<"FileChanged"> & { file_path: string };
+export type WorktreeCreateInput = HookEvent<"WorktreeCreate">;
+export type WorktreeRemoveInput = HookEvent<"WorktreeRemove">;
 
-export interface FileChangedInput extends HookInputCommon {
-  hook_event_name: "FileChanged";
-  file_path: string;
-}
-
-export interface WorktreeCreateInput extends HookInputCommon {
-  hook_event_name: "WorktreeCreate";
-}
-
-export interface WorktreeRemoveInput extends HookInputCommon {
-  hook_event_name: "WorktreeRemove";
-}
-
-export interface PreCompactInput extends HookInputCommon {
-  hook_event_name: "PreCompact";
-  trigger: CompactTrigger;
-}
-
-export interface PostCompactInput extends HookInputCommon {
-  hook_event_name: "PostCompact";
-  trigger: CompactTrigger;
-}
-
-export interface ElicitationInput extends HookInputCommon {
-  hook_event_name: "Elicitation";
-  mcp_server_name: string;
-}
-
-export interface ElicitationResultInput extends HookInputCommon {
-  hook_event_name: "ElicitationResult";
-  mcp_server_name: string;
-}
+export type PreCompactInput = HookEvent<"PreCompact"> & { trigger: CompactTrigger };
+export type PostCompactInput = HookEvent<"PostCompact"> & { trigger: CompactTrigger };
+export type ElicitationInput = HookEvent<"Elicitation"> & { mcp_server_name: string };
+export type ElicitationResultInput = HookEvent<"ElicitationResult"> & { mcp_server_name: string };
 
 /**
  * Discriminated union of every possible hook stdin payload.
@@ -437,14 +351,31 @@ export type HookInput =
 
 export type PermissionDecision = "allow" | "deny" | "ask" | "defer";
 
-export interface PreToolUseHookOutput {
-  hookEventName: "PreToolUse";
+/** Shorthand for hook output types that narrow only the event name. */
+type HookEventOutput<E extends string> = { hookEventName: E };
+
+/** Shared shape for outputs that only carry additionalContext. */
+type ContextOnlyOutput<E extends string> = HookEventOutput<E> & {
+  additionalContext?: string;
+};
+
+/** Shared shape for outputs that carry additionalContext + sessionTitle. */
+type SessionOutput<E extends string> = ContextOnlyOutput<E> & {
+  sessionTitle?: string;
+};
+
+/** Shared shape for elicitation outputs. */
+type ElicitationOutput<E extends string> = HookEventOutput<E> & {
+  action?: "accept" | "decline" | "cancel";
+  content?: Record<string, unknown>;
+};
+
+export type PreToolUseHookOutput = ContextOnlyOutput<"PreToolUse"> & {
   permissionDecision?: PermissionDecision;
   permissionDecisionReason?: string;
   /** Replaces the entire tool_input Claude generated. */
   updatedInput?: Record<string, unknown>;
-  additionalContext?: string;
-}
+};
 
 export interface PermissionRequestDecision {
   behavior: "allow" | "deny";
@@ -471,68 +402,34 @@ export interface PermissionRequestDecision {
   interrupt?: boolean;
 }
 
-export interface PermissionRequestHookOutput {
-  hookEventName: "PermissionRequest";
+export type PermissionRequestHookOutput = HookEventOutput<"PermissionRequest"> & {
   decision?: PermissionRequestDecision;
-}
+};
 
-export interface PostToolUseHookOutput {
-  hookEventName: "PostToolUse";
-  additionalContext?: string;
+export type PostToolUseHookOutput = ContextOnlyOutput<"PostToolUse"> & {
   /** MCP tools only — replaces the tool_response. */
   updatedMCPToolOutput?: unknown;
-}
+};
 
-export interface PostToolUseFailureHookOutput {
-  hookEventName: "PostToolUseFailure";
-  additionalContext?: string;
-}
+export type PostToolUseFailureHookOutput = ContextOnlyOutput<"PostToolUseFailure">;
 
-export interface PermissionDeniedHookOutput {
-  hookEventName: "PermissionDenied";
+export type PermissionDeniedHookOutput = HookEventOutput<"PermissionDenied"> & {
   /** true = tell the model it may retry. */
   retry?: boolean;
-}
+};
 
-export interface UserPromptSubmitHookOutput {
-  hookEventName: "UserPromptSubmit";
-  additionalContext?: string;
-  sessionTitle?: string;
-}
+export type UserPromptSubmitHookOutput = SessionOutput<"UserPromptSubmit">;
+export type SessionStartHookOutput = SessionOutput<"SessionStart">;
+export type SubagentStartHookOutput = ContextOnlyOutput<"SubagentStart">;
+export type NotificationHookOutput = ContextOnlyOutput<"Notification">;
 
-export interface SessionStartHookOutput {
-  hookEventName: "SessionStart";
-  additionalContext?: string;
-  sessionTitle?: string;
-}
-
-export interface SubagentStartHookOutput {
-  hookEventName: "SubagentStart";
-  additionalContext?: string;
-}
-
-export interface NotificationHookOutput {
-  hookEventName: "Notification";
-  additionalContext?: string;
-}
-
-export interface WorktreeCreateHookOutput {
-  hookEventName: "WorktreeCreate";
+export type WorktreeCreateHookOutput = HookEventOutput<"WorktreeCreate"> & {
   /** HTTP hooks return path here; command hooks print to stdout instead. */
   worktreePath?: string;
-}
+};
 
-export interface ElicitationHookOutput {
-  hookEventName: "Elicitation";
-  action?: "accept" | "decline" | "cancel";
-  content?: Record<string, unknown>;
-}
-
-export interface ElicitationResultHookOutput {
-  hookEventName: "ElicitationResult";
-  action?: "accept" | "decline" | "cancel";
-  content?: Record<string, unknown>;
-}
+export type ElicitationHookOutput = ElicitationOutput<"Elicitation">;
+export type ElicitationResultHookOutput = ElicitationOutput<"ElicitationResult">;
 
 export type HookSpecificOutput =
   | PreToolUseHookOutput
@@ -547,6 +444,25 @@ export type HookSpecificOutput =
   | WorktreeCreateHookOutput
   | ElicitationHookOutput
   | ElicitationResultHookOutput;
+
+/**
+ * Map from event name → its hook-specific output type.
+ * Events not listed here have no event-specific output (only universal HookOutput fields).
+ */
+export interface HookOutputMap {
+  SessionStart: SessionStartHookOutput;
+  UserPromptSubmit: UserPromptSubmitHookOutput;
+  PreToolUse: PreToolUseHookOutput;
+  PermissionRequest: PermissionRequestHookOutput;
+  PermissionDenied: PermissionDeniedHookOutput;
+  PostToolUse: PostToolUseHookOutput;
+  PostToolUseFailure: PostToolUseFailureHookOutput;
+  Notification: NotificationHookOutput;
+  SubagentStart: SubagentStartHookOutput;
+  WorktreeCreate: WorktreeCreateHookOutput;
+  Elicitation: ElicitationHookOutput;
+  ElicitationResult: ElicitationResultHookOutput;
+}
 
 /**
  * Root JSON object written to stdout.

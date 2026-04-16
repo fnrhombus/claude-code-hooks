@@ -3,45 +3,34 @@ import type {
   BuiltinToolName,
   ConfigChangeInput,
   CwdChangedInput,
-  ElicitationHookOutput,
   ElicitationInput,
-  ElicitationResultHookOutput,
   ElicitationResultInput,
   FileChangedInput,
   HookInput,
   HookOutput,
+  HookOutputMap,
   InstructionsLoadedInput,
-  NotificationHookOutput,
   NotificationInput,
-  PermissionDeniedHookOutput,
   PermissionDeniedInput,
-  PermissionRequestHookOutput,
   PermissionRequestInput,
   PostCompactInput,
-  PostToolUseFailureHookOutput,
   PostToolUseFailureInput,
-  PostToolUseHookOutput,
   PostToolUseInput,
   PreCompactInput,
-  PreToolUseHookOutput,
   PreToolUseInput,
   SessionEndInput,
-  SessionStartHookOutput,
   SessionStartInput,
   StopFailureInput,
   StopInput,
-  SubagentStartHookOutput,
   SubagentStartInput,
   SubagentStopInput,
   TaskCompletedInput,
   TaskCreatedInput,
   TeammateIdleInput,
-  UserPromptSubmitHookOutput,
   UserPromptSubmitInput,
-  WorktreeCreateHookOutput,
   WorktreeCreateInput,
   WorktreeRemoveInput,
-} from "./types.js";
+} from "./types2.js";
 
 // ============================================================================
 // Handler return shapes (one per event)
@@ -60,21 +49,21 @@ export interface UniversalReturn {
 }
 
 /** Derive a handler return type from a HookOutput type: drop the discriminator, add universal fields. */
-type HookReturn<T> = Omit<T, "hookEventName"> & UniversalReturn;
-type BlockableHookReturn<T> = HookReturn<T> & { block?: string };
+type HookReturn<E extends keyof HookOutputMap> = Omit<HookOutputMap[E], "hookEventName"> & UniversalReturn;
+type BlockableHookReturn<E extends keyof HookOutputMap> = HookReturn<E> & { block?: string };
 
-export type PreToolUseReturn = HookReturn<PreToolUseHookOutput>;
-export type PermissionRequestReturn = HookReturn<PermissionRequestHookOutput>;
-export type PostToolUseReturn = BlockableHookReturn<PostToolUseHookOutput>;
-export type PostToolUseFailureReturn = HookReturn<PostToolUseFailureHookOutput>;
-export type PermissionDeniedReturn = HookReturn<PermissionDeniedHookOutput>;
-export type UserPromptSubmitReturn = BlockableHookReturn<UserPromptSubmitHookOutput>;
-export type SessionStartReturn = HookReturn<SessionStartHookOutput>;
-export type SubagentStartReturn = HookReturn<SubagentStartHookOutput>;
-export type NotificationReturn = HookReturn<NotificationHookOutput>;
-export type WorktreeCreateReturn = HookReturn<WorktreeCreateHookOutput>;
-export type ElicitationReturn = HookReturn<ElicitationHookOutput>;
-export type ElicitationResultReturn = HookReturn<ElicitationResultHookOutput>;
+export type PreToolUseReturn = HookReturn<"PreToolUse">;
+export type PermissionRequestReturn = HookReturn<"PermissionRequest">;
+export type PostToolUseReturn = BlockableHookReturn<"PostToolUse">;
+export type PostToolUseFailureReturn = HookReturn<"PostToolUseFailure">;
+export type PermissionDeniedReturn = HookReturn<"PermissionDenied">;
+export type UserPromptSubmitReturn = BlockableHookReturn<"UserPromptSubmit">;
+export type SessionStartReturn = HookReturn<"SessionStart">;
+export type SubagentStartReturn = HookReturn<"SubagentStart">;
+export type NotificationReturn = HookReturn<"Notification">;
+export type WorktreeCreateReturn = HookReturn<"WorktreeCreate">;
+export type ElicitationReturn = HookReturn<"Elicitation">;
+export type ElicitationResultReturn = HookReturn<"ElicitationResult">;
 
 /** Events that support `decision: "block"` but have no event-specific output fields. */
 export type BlockableReturn = UniversalReturn & { block?: string };
