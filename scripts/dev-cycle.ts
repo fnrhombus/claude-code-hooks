@@ -16,6 +16,9 @@
  *   7. On still-failure: update BLOCKERS.md, assign issue, exit 3
  *   8. On success: push, open PR, wait for CI, run PR review, merge, cleanup
  *
+ * CLI flags:
+ *   --force, -f            Skip the hash check and regenerate even if up to date
+ *
  * Env overrides:
  *   DEV_CYCLE_REPO_DIR    Repo root (default: process.cwd())
  *   DEV_CYCLE_DRY_RUN     "1" to skip gh/git push operations
@@ -63,6 +66,7 @@ const MODEL_HAIKU = "claude-haiku-4-5-20251001";
 
 const DRY_RUN = process.env.DEV_CYCLE_DRY_RUN === "1";
 const SKIP_PR = process.env.DEV_CYCLE_SKIP_PR === "1";
+const FORCE = process.argv.includes("--force") || process.argv.includes("-f");
 
 process.chdir(REPO_DIR);
 mkdirSync(STATE_DIR, { recursive: true });
@@ -259,10 +263,13 @@ async function main(): Promise<void> {
   }
   log(`upstream hash: ${newHash}`);
 
-  if (oldHash === newHash) {
+  if (oldHash === newHash && !FORCE) {
     log("types are up to date — nothing to do (zero Claude tokens consumed)");
     rmSync(STATE_DIR, { recursive: true, force: true });
     process.exit(0);
+  }
+  if (FORCE && oldHash === newHash) {
+    log("--force: skipping hash check, regenerating anyway");
   }
 
   log(`upstream changed: ${oldHash || "<none>"} → ${newHash}`);
