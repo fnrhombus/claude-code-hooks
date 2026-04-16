@@ -1,4 +1,4 @@
-// SOURCE_SHA256: d973ccaabc400d7f632461ebff7ed1f56065f4abc09c7e49059635e52515c638
+// SOURCE_SHA256: 41481f0290c739b8d8508e071fea572b42a73fb0ee87b24c9a2388d2c5dc7943
 /**
  * TypeScript types for the Claude Code hook API (stdin/stdout protocol).
  *
@@ -13,17 +13,37 @@
 // Enums
 // ============================================================================
 
-export type PermissionMode =
-  | "default"
-  | "plan"
-  | "acceptEdits"
-  | "auto"
-  | "dontAsk"
-  | "bypassPermissions";
+/**
+ * What triggered a context compaction.
+ *
+ * - `"manual"` — user ran `/compact`
+ * - `"auto"` — automatic compaction when the context window filled up
+ *
+ * Used as the matcher value for `PreCompact` and `PostCompact` hooks.
+ */
+export type CompactTrigger = "manual" | "auto";
 
+/**
+ * Every hook event name Claude Code emits. Used as the `hook_event_name`
+ * discriminator on all hook input payloads.
+ *
+ * Events fire at these lifecycle points:
+ * - Once per session: `SessionStart`, `SessionEnd`
+ * - Once per turn: `UserPromptSubmit`, `Stop`, `StopFailure`
+ * - On every tool call: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+ *   `PermissionRequest`, `PermissionDenied`
+ * - Subagent lifecycle: `SubagentStart`, `SubagentStop`
+ * - Task lifecycle: `TaskCreated`, `TaskCompleted`
+ * - Agent teams: `TeammateIdle`
+ * - Compaction: `PreCompact`, `PostCompact`
+ * - File/config observation: `InstructionsLoaded`, `ConfigChange`,
+ *   `CwdChanged`, `FileChanged`
+ * - Worktree management: `WorktreeCreate`, `WorktreeRemove`
+ * - MCP elicitation: `Elicitation`, `ElicitationResult`
+ * - Notifications: `Notification`
+ */
 export type HookEventName =
   | "SessionStart"
-  | "SessionEnd"
   | "UserPromptSubmit"
   | "PreToolUse"
   | "PermissionRequest"
@@ -47,171 +67,258 @@ export type HookEventName =
   | "PreCompact"
   | "PostCompact"
   | "Elicitation"
-  | "ElicitationResult";
+  | "ElicitationResult"
+  | "SessionEnd";
 
-export type SessionSource = "startup" | "resume" | "clear" | "compact";
-
-export type SessionEndReason =
-  | "clear"
-  | "resume"
-  | "logout"
-  | "prompt_input_exit"
-  | "bypass_permissions_disabled"
-  | "other";
-
-export type NotificationType =
-  | "permission_prompt"
-  | "idle_prompt"
-  | "auth_success"
-  | "elicitation_dialog";
-
-export type StopErrorType =
-  | "rate_limit"
-  | "authentication_failed"
-  | "billing_error"
-  | "invalid_request"
-  | "server_error"
-  | "max_output_tokens"
-  | "unknown";
-
-export type MemoryType = "User" | "Project" | "Local" | "Managed";
-
-export type LoadReason =
-  | "session_start"
-  | "nested_traversal"
-  | "path_glob_match"
-  | "include"
-  | "compact";
-
-export type ConfigSource =
-  | "user_settings"
-  | "project_settings"
-  | "local_settings"
-  | "policy_settings"
-  | "skills";
-
-export type CompactTrigger = "manual" | "auto";
+/**
+ * The current permission mode of the Claude Code session.
+ *
+ * - `"default"` — standard permission prompting
+ * - `"plan"` — plan mode; Claude proposes before acting
+ * - `"acceptEdits"` — file edits are auto-approved
+ * - `"auto"` — fully automated; no permission prompts
+ * - `"dontAsk"` — skip asking the user
+ * - `"bypassPermissions"` — bypass all permission checks
+ */
+export type PermissionMode =
+  | "default"
+  | "plan"
+  | "acceptEdits"
+  | "auto"
+  | "dontAsk"
+  | "bypassPermissions";
 
 // ============================================================================
 // Common input fields (present on every hook event)
 // ============================================================================
 
+/**
+ * Fields present on every hook event's stdin JSON payload.
+ * Event-specific fields are added by each per-event interface.
+ *
+ * For command hooks, this JSON arrives via stdin.
+ * For HTTP hooks, it arrives as the POST request body.
+ */
 export interface HookInputCommon {
-  session_id: string;
-  transcript_path: string;
-  cwd: string;
+  /** Name of the event that fired. Use this to narrow the type. */
   hook_event_name: HookEventName;
-  permission_mode?: PermissionMode;
-  /** Only set when the hook is firing inside a subagent context. */
+  /**
+   * Unique identifier for the subagent. Present only when the hook fires inside
+   * a subagent call. Use this to distinguish subagent hook calls from
+   * main-thread calls.
+   */
   agent_id?: string;
+  /**
+   * Agent name (e.g. `"Explore"` or `"security-reviewer"`). Present when the
+   * session uses `--agent` or the hook fires inside a subagent. For subagents,
+   * the subagent's type takes precedence over the session's `--agent` value.
+   */
   agent_type?: string;
+  /** Current working directory when the hook is invoked. */
+  cwd: string;
+  /**
+   * Current permission mode. Not all events include this field — check each
+   * event's JSON example to confirm whether it is present.
+   */
+  permission_mode?: PermissionMode;
+  /** Current session identifier. */
+  session_id: string;
+  /** Path to the conversation JSONL transcript file. */
+  transcript_path: string;
 }
 
 // ============================================================================
 // Tool input schemas (tool_input shape per built-in tool)
 // ============================================================================
 
-export interface BashToolInput {
-  command: string;
-  description?: string;
-  /** Milliseconds. */
-  timeout?: number;
-  run_in_background?: boolean;
-}
-
-export interface WriteToolInput {
-  file_path: string;
-  content: string;
-}
-
-export interface EditToolInput {
-  file_path: string;
-  old_string: string;
-  new_string: string;
-  replace_all?: boolean;
-}
-
-export interface ReadToolInput {
-  file_path: string;
-  offset?: number;
-  limit?: number;
-}
-
-export interface GlobToolInput {
-  pattern: string;
-  path?: string;
-}
-
-export interface GrepToolInput {
-  pattern: string;
-  path?: string;
-  glob?: string;
-  type?: string;
-  output_mode?: "content" | "files_with_matches" | "count";
-  "-i"?: boolean;
-  "-n"?: boolean;
-  "-A"?: number;
-  "-B"?: number;
-  "-C"?: number;
-  multiline?: boolean;
-  head_limit?: number;
-}
-
-export interface WebFetchToolInput {
-  url: string;
-  prompt: string;
-}
-
-export interface WebSearchToolInput {
-  query: string;
-  allowed_domains?: string[];
-  blocked_domains?: string[];
-}
-
+/**
+ * `tool_input` shape for the `Agent` tool, which spawns a subagent.
+ * @see {@link BuiltinToolInputMap}
+ */
 export interface AgentToolInput {
-  prompt: string;
+  /** Short description of the task. */
   description?: string;
-  subagent_type: string;
+  /** Optional model alias to override the default (e.g. `"sonnet"`). */
   model?: string;
+  /** The task for the agent to perform. */
+  prompt: string;
+  /** Type of specialized agent to use (e.g. `"Explore"`, `"Plan"`). */
+  subagent_type: string;
 }
 
+/**
+ * `tool_input` shape for the `AskUserQuestion` tool, which presents the user
+ * with one to four multiple-choice questions.
+ * @see {@link BuiltinToolInputMap}
+ */
 export interface AskUserQuestionInput {
+  /**
+   * Maps question text to the selected option label. Multi-select answers join
+   * labels with commas. Claude does not set this field; supply it via
+   * `updatedInput` to answer programmatically.
+   */
+  answers?: Record<string, string>;
+  /**
+   * Questions to present, each with a `question` string, a short `header`,
+   * an `options` array, and an optional `multiSelect` flag.
+   */
   questions: Array<{
     question: string;
     header: string;
     options: Array<{ label: string }>;
     multiSelect?: boolean;
   }>;
-  answers?: Record<string, string>;
 }
 
+/**
+ * `tool_input` shape for the `Bash` tool, which executes shell commands.
+ * @see {@link BuiltinToolInputMap}
+ */
+export interface BashToolInput {
+  /** The shell command to execute. */
+  command: string;
+  /** Optional description of what the command does. */
+  description?: string;
+  /** Whether to run the command in the background. */
+  run_in_background?: boolean;
+  /** Optional timeout in milliseconds. */
+  timeout?: number;
+}
+
+/**
+ * `tool_input` shape for the `Edit` tool, which replaces a string in an
+ * existing file.
+ * @see {@link BuiltinToolInputMap}
+ */
+export interface EditToolInput {
+  /** Absolute path to the file to edit. */
+  file_path: string;
+  /** Replacement text. */
+  new_string: string;
+  /** Text to find and replace. */
+  old_string: string;
+  /** Whether to replace all occurrences. */
+  replace_all?: boolean;
+}
+
+/**
+ * `tool_input` shape for the `ExitPlanMode` tool.
+ * @see {@link BuiltinToolInputMap}
+ */
 export interface ExitPlanModeInput {
+  /** The plan text, if provided. */
   plan?: string;
 }
 
 /**
- * Map from built-in tool name → its tool_input shape.
+ * `tool_input` shape for the `Glob` tool, which finds files matching a glob
+ * pattern.
+ * @see {@link BuiltinToolInputMap}
+ */
+export interface GlobToolInput {
+  /** Optional directory to search in. Defaults to the current working directory. */
+  path?: string;
+  /** Glob pattern to match files against (e.g. `"**/*.ts"`). */
+  pattern: string;
+}
+
+/**
+ * `tool_input` shape for the `Grep` tool, which searches file contents with
+ * regular expressions.
+ * @see {@link BuiltinToolInputMap}
+ */
+export interface GrepToolInput {
+  /** Case-insensitive search. */
+  "-i"?: boolean;
+  /** Optional glob pattern to filter files. */
+  glob?: string;
+  /** Enable multiline matching. */
+  multiline?: boolean;
+  /**
+   * Output mode: `"content"` shows matching lines, `"files_with_matches"` shows
+   * file paths, `"count"` shows match counts. Defaults to `"files_with_matches"`.
+   */
+  output_mode?: "content" | "files_with_matches" | "count";
+  /** Optional file or directory to search in. */
+  path?: string;
+  /** Regular expression pattern to search for. */
+  pattern: string;
+}
+
+/**
+ * `tool_input` shape for the `Read` tool, which reads file contents.
+ * @see {@link BuiltinToolInputMap}
+ */
+export interface ReadToolInput {
+  /** Absolute path to the file to read. */
+  file_path: string;
+  /** Optional number of lines to read. */
+  limit?: number;
+  /** Optional line number to start reading from. */
+  offset?: number;
+}
+
+/**
+ * `tool_input` shape for the `WebFetch` tool, which fetches and processes
+ * web content.
+ * @see {@link BuiltinToolInputMap}
+ */
+export interface WebFetchToolInput {
+  /** Prompt to run on the fetched content. */
+  prompt: string;
+  /** URL to fetch content from. */
+  url: string;
+}
+
+/**
+ * `tool_input` shape for the `WebSearch` tool, which searches the web.
+ * @see {@link BuiltinToolInputMap}
+ */
+export interface WebSearchToolInput {
+  /** Optional: exclude results from these domains. */
+  blocked_domains?: string[];
+  /** Optional: only include results from these domains. */
+  allowed_domains?: string[];
+  /** Search query. */
+  query: string;
+}
+
+/**
+ * `tool_input` shape for the `Write` tool, which creates or overwrites a file.
+ * @see {@link BuiltinToolInputMap}
+ */
+export interface WriteToolInput {
+  /** Content to write to the file. */
+  content: string;
+  /** Absolute path to the file to write. */
+  file_path: string;
+}
+
+/**
+ * Map from built-in tool name to its `tool_input` shape.
  * MCP tools follow the pattern `mcp__<server>__<tool>` and have arbitrary shapes.
  */
 export interface BuiltinToolInputMap {
-  Bash: BashToolInput;
-  Write: WriteToolInput;
-  Edit: EditToolInput;
-  Read: ReadToolInput;
-  Glob: GlobToolInput;
-  Grep: GrepToolInput;
-  WebFetch: WebFetchToolInput;
-  WebSearch: WebSearchToolInput;
   Agent: AgentToolInput;
   AskUserQuestion: AskUserQuestionInput;
+  Bash: BashToolInput;
+  Edit: EditToolInput;
   ExitPlanMode: ExitPlanModeInput;
+  Glob: GlobToolInput;
+  Grep: GrepToolInput;
+  Read: ReadToolInput;
+  WebFetch: WebFetchToolInput;
+  WebSearch: WebSearchToolInput;
+  Write: WriteToolInput;
 }
 
+/** Union of all built-in tool names. */
 export type BuiltinToolName = keyof BuiltinToolInputMap;
 
 /**
- * Discriminated union over tool_name → tool_input.
- * Falls through to `{ tool_name: string; tool_input: unknown }` for MCP tools.
+ * Discriminated union over `tool_name` → `tool_input`.
+ * Falls through to `{ tool_name: string; tool_input: Record<string, unknown> }`
+ * for MCP tools (naming pattern `mcp__<server>__<tool>`).
  */
 export type ToolCall =
   | {
@@ -226,186 +333,678 @@ export type ToolCall =
 // Per-event input types
 // ============================================================================
 
+/**
+ * Input for `SessionStart` hooks. Fires when Claude Code starts a new session
+ * or resumes an existing one. Useful for loading context, setting up environment
+ * variables, or logging session metadata.
+ *
+ * Only `type: "command"` hooks are supported for this event.
+ *
+ * Matcher values: `"startup"` (new session), `"resume"` (`--resume`,
+ * `--continue`, or `/resume`), `"clear"` (`/clear`), `"compact"` (after
+ * compaction).
+ */
 export interface SessionStartInput extends HookInputCommon {
   hook_event_name: "SessionStart";
-  source: SessionSource;
-  model: string;
+  /**
+   * Agent name when Claude Code was started with `claude --agent <name>`.
+   * Overrides the common `agent_type` field for this event.
+   */
   agent_type?: string;
+  /** Model identifier for the session (e.g. `"claude-sonnet-4-6"`). */
+  model: string;
+  /**
+   * How the session was initiated: `"startup"` for new sessions, `"resume"` for
+   * resumed sessions, `"clear"` after `/clear`, or `"compact"` after compaction.
+   */
+  source: "startup" | "resume" | "clear" | "compact";
 }
 
-export interface SessionEndInput extends HookInputCommon {
-  hook_event_name: "SessionEnd";
-  reason: SessionEndReason;
-}
-
+/**
+ * Input for `UserPromptSubmit` hooks. Fires when the user submits a prompt,
+ * before Claude processes it. Use to add context, validate prompts, or block
+ * certain types of prompts.
+ *
+ * No matcher support — always fires on every prompt submission.
+ */
 export interface UserPromptSubmitInput extends HookInputCommon {
   hook_event_name: "UserPromptSubmit";
+  /** Always present for this event. */
   permission_mode: PermissionMode;
+  /** The text the user submitted. */
   prompt: string;
 }
 
+/**
+ * Input for `PreToolUse` hooks. Fires after Claude creates tool parameters and
+ * before processing the tool call.
+ *
+ * Matcher values: tool name (`"Bash"`, `"Edit"`, `"Write"`, etc.) or MCP tool
+ * pattern (`"mcp__<server>__<tool>"`).
+ *
+ * Use decision control to allow, deny, ask, or defer the tool call.
+ */
 export type PreToolUseInput = HookInputCommon & {
   hook_event_name: "PreToolUse";
+  /** Always present for this event. */
   permission_mode: PermissionMode;
+  /** Identifier for this specific tool use, correlating PreToolUse and PostToolUse events. */
   tool_use_id: string;
 } & ToolCall;
 
+/**
+ * An "always allow" suggestion that would normally appear in the permission dialog.
+ * Returned in `PermissionRequestInput.permission_suggestions`.
+ */
 export interface PermissionSuggestion {
-  type: "addRules";
-  rules: Array<{ toolName: string; ruleContent?: string }>;
+  /** Whether to allow, deny, or ask for this rule. */
   behavior: "allow" | "deny" | "ask";
+  /** Which settings file to write the rule to. */
   destination: "localSettings" | "projectSettings" | "userSettings";
+  /** The rules to add. */
+  rules: Array<{ toolName: string; ruleContent?: string }>;
+  /** Currently always `"addRules"`. */
+  type: "addRules";
 }
 
+/**
+ * Input for `PermissionRequest` hooks. Fires when a permission dialog is about
+ * to be shown to the user.
+ *
+ * Unlike `PreToolUse` (which fires before every tool execution), this fires only
+ * when the user would normally see a permission prompt. Use to allow or deny on
+ * behalf of the user.
+ *
+ * Matcher values: tool name, same as `PreToolUse`.
+ */
 export type PermissionRequestInput = HookInputCommon & {
   hook_event_name: "PermissionRequest";
+  /** Always present for this event. */
   permission_mode: PermissionMode;
-  tool_use_id?: string;
+  /**
+   * The "always allow" options the user would normally see in the permission
+   * dialog. A hook can echo one of these as its own `updatedPermissions` output,
+   * equivalent to the user selecting that option.
+   */
   permission_suggestions?: PermissionSuggestion[];
+  /** Present for most tool calls; may be absent in some edge cases. */
+  tool_use_id?: string;
 } & ToolCall;
 
+/**
+ * Input for `PermissionDenied` hooks. Fires when the auto mode classifier denies
+ * a tool call.
+ *
+ * Only fires in auto mode. Does NOT fire when the user manually denies a
+ * permission dialog, when a `PreToolUse` hook blocks the call, or when a `deny`
+ * rule matches.
+ *
+ * Matcher values: tool name, same as `PreToolUse`.
+ *
+ * Exit code and stderr are ignored; use `hookSpecificOutput.retry: true` to
+ * tell the model it may retry the denied call.
+ */
 export type PermissionDeniedInput = HookInputCommon & {
   hook_event_name: "PermissionDenied";
+  /** Always `"auto"` since this event only fires in auto mode. */
   permission_mode: "auto";
-  tool_use_id: string;
+  /** The classifier's explanation for why the tool call was denied. */
   reason: string;
+  /** Identifier for the denied tool use. */
+  tool_use_id: string;
 } & ToolCall;
 
+/**
+ * Input for `PostToolUse` hooks. Fires immediately after a tool completes
+ * successfully. The tool has already run; exit code 2 shows stderr to Claude
+ * but cannot undo the action.
+ *
+ * Matcher values: tool name, same as `PreToolUse`.
+ */
 export type PostToolUseInput = HookInputCommon & {
   hook_event_name: "PostToolUse";
+  /** Always present for this event. */
   permission_mode: PermissionMode;
-  tool_use_id: string;
+  /** The result returned by the tool. Shape varies by tool. */
   tool_response: unknown;
+  /** Identifier correlating this with the corresponding `PreToolUse` event. */
+  tool_use_id: string;
 } & ToolCall;
 
+/**
+ * Input for `PostToolUseFailure` hooks. Fires when a tool execution fails
+ * (throws an error or returns a failure result). Use to log failures, send
+ * alerts, or provide corrective feedback to Claude.
+ *
+ * Matcher values: tool name, same as `PreToolUse`.
+ */
 export type PostToolUseFailureInput = HookInputCommon & {
   hook_event_name: "PostToolUseFailure";
-  permission_mode: PermissionMode;
-  tool_use_id: string;
+  /** String describing what went wrong. */
   error: string;
+  /** Whether the failure was caused by user interruption. */
   is_interrupt?: boolean;
+  /** Always present for this event. */
+  permission_mode: PermissionMode;
+  /** Identifier for the failed tool use. */
+  tool_use_id: string;
 } & ToolCall;
 
+/**
+ * Input for `Notification` hooks. Fires when Claude Code sends a notification.
+ *
+ * Matcher values: `"permission_prompt"`, `"idle_prompt"`, `"auth_success"`,
+ * `"elicitation_dialog"`. Omit the matcher to fire for all notification types.
+ *
+ * Cannot block or modify notifications. Use for side effects like custom
+ * desktop notifications or logging.
+ */
 export interface NotificationInput extends HookInputCommon {
   hook_event_name: "Notification";
+  /** The notification text. */
   message: string;
+  /**
+   * Which notification type fired:
+   * - `"permission_prompt"` — Claude needs permission approval
+   * - `"idle_prompt"` — Claude has been idle
+   * - `"auth_success"` — authentication succeeded
+   * - `"elicitation_dialog"` — an MCP elicitation dialog appeared
+   */
+  notification_type: "permission_prompt" | "idle_prompt" | "auth_success" | "elicitation_dialog";
+  /** Optional notification title. */
   title?: string;
-  notification_type: NotificationType;
 }
 
+/**
+ * Input for `SubagentStart` hooks. Fires when a Claude Code subagent is spawned
+ * via the Agent tool. Cannot block subagent creation, but can inject context
+ * into the subagent.
+ *
+ * Matcher values: agent type name (`"Bash"`, `"Explore"`, `"Plan"`, or custom
+ * agent names from `.claude/agents/`).
+ */
 export interface SubagentStartInput extends HookInputCommon {
   hook_event_name: "SubagentStart";
+  /** Unique identifier for the spawned subagent. */
   agent_id: string;
+  /**
+   * Agent name: built-in agents like `"Bash"`, `"Explore"`, `"Plan"`, or custom
+   * agent names. This is the value used for matcher filtering.
+   */
   agent_type: string;
 }
 
+/**
+ * Input for `SubagentStop` hooks. Fires when a Claude Code subagent has finished
+ * responding. Uses the same decision control format as `Stop` hooks.
+ *
+ * Matcher values: agent type, same values as `SubagentStart`.
+ */
 export interface SubagentStopInput extends HookInputCommon {
   hook_event_name: "SubagentStop";
-  permission_mode: PermissionMode;
-  stop_hook_active: boolean;
-  agent_id: string;
-  agent_type: string;
+  /**
+   * Path to the subagent's own transcript file, stored in a nested `subagents/`
+   * folder. Different from `transcript_path`, which is the main session's
+   * transcript.
+   */
   agent_transcript_path: string;
+  /** Unique identifier for the subagent that finished. */
+  agent_id: string;
+  /** Agent name, used for matcher filtering. */
+  agent_type: string;
+  /**
+   * Text content of the subagent's final response. Provided so hooks can access
+   * it without parsing the transcript file.
+   */
   last_assistant_message: string;
+  /** Always present for this event. */
+  permission_mode: PermissionMode;
+  /**
+   * `true` when Claude Code is already continuing as a result of a stop hook.
+   * Check this value to prevent the subagent from running indefinitely.
+   */
+  stop_hook_active: boolean;
 }
 
+/**
+ * Input for `TaskCreated` hooks. Fires when a task is being created via the
+ * `TaskCreate` tool.
+ *
+ * No matcher support — fires on every task creation.
+ *
+ * Exit code 2 rolls back the task creation and the stderr message is fed back
+ * to the model. Return `{"continue": false, "stopReason": "..."}` to stop the
+ * teammate entirely.
+ */
 export interface TaskCreatedInput extends HookInputCommon {
   hook_event_name: "TaskCreated";
+  /** Always present for this event. */
   permission_mode: PermissionMode;
-  task_id: string;
-  task_subject: string;
+  /** Detailed description of the task. May be absent. */
   task_description?: string;
-  teammate_name?: string;
+  /** Identifier of the task being created. */
+  task_id: string;
+  /** Title of the task. */
+  task_subject: string;
+  /** Name of the team. May be absent. */
   team_name?: string;
+  /** Name of the teammate creating the task. May be absent. */
+  teammate_name?: string;
 }
 
+/**
+ * Input for `TaskCompleted` hooks. Fires when a task is being marked as
+ * completed — either when an agent explicitly marks it via `TaskUpdate`, or
+ * when an agent team teammate finishes its turn with in-progress tasks.
+ *
+ * No matcher support — fires on every task completion.
+ *
+ * Exit code 2 prevents the task from being marked as completed and the stderr
+ * message is fed back to the model. Return `{"continue": false, "stopReason":
+ * "..."}` to stop the teammate entirely.
+ */
 export interface TaskCompletedInput extends HookInputCommon {
   hook_event_name: "TaskCompleted";
+  /** Always present for this event. */
   permission_mode: PermissionMode;
-  task_id: string;
-  task_subject: string;
+  /** Detailed description of the task. May be absent. */
   task_description?: string;
-  teammate_name?: string;
+  /** Identifier of the task being completed. */
+  task_id: string;
+  /** Title of the task. */
+  task_subject: string;
+  /** Name of the team. May be absent. */
   team_name?: string;
+  /** Name of the teammate completing the task. May be absent. */
+  teammate_name?: string;
 }
 
+/**
+ * Input for `Stop` hooks. Fires when the main Claude Code agent has finished
+ * responding. Does NOT fire on user interrupts. API errors fire `StopFailure`
+ * instead.
+ *
+ * No matcher support — fires on every stop.
+ *
+ * Return `{"decision": "block", "reason": "..."}` to prevent Claude from
+ * stopping and continue the conversation.
+ */
 export interface StopInput extends HookInputCommon {
   hook_event_name: "Stop";
+  /**
+   * Text content of Claude's final response for this turn. Provided so hooks
+   * can access it without parsing the transcript file.
+   */
+  last_assistant_message: string;
+  /** Always present for this event. */
   permission_mode: PermissionMode;
+  /**
+   * `true` when Claude Code is already continuing as a result of a stop hook.
+   * Check this value (or inspect the transcript) to prevent an infinite loop.
+   */
+  stop_hook_active: boolean;
 }
 
+/**
+ * Input for `StopFailure` hooks. Fires instead of `Stop` when the turn ends due
+ * to an API error. Output and exit code are ignored — use this event for logging,
+ * alerting, or recovery actions only.
+ *
+ * Matcher values: error type — `"rate_limit"`, `"authentication_failed"`,
+ * `"billing_error"`, `"invalid_request"`, `"server_error"`,
+ * `"max_output_tokens"`, `"unknown"`.
+ */
 export interface StopFailureInput extends HookInputCommon {
   hook_event_name: "StopFailure";
-  permission_mode: PermissionMode;
-  error_type: StopErrorType;
+  /**
+   * Error type, used for matcher filtering:
+   * - `"rate_limit"` — rate limit exceeded
+   * - `"authentication_failed"` — authentication error
+   * - `"billing_error"` — billing issue
+   * - `"invalid_request"` — invalid API request
+   * - `"server_error"` — API server error
+   * - `"max_output_tokens"` — response exceeded token limit
+   * - `"unknown"` — unrecognized error type
+   */
+  error:
+    | "rate_limit"
+    | "authentication_failed"
+    | "billing_error"
+    | "invalid_request"
+    | "server_error"
+    | "max_output_tokens"
+    | "unknown";
+  /** Additional details about the error, when available. */
+  error_details?: string;
+  /**
+   * The rendered error text shown in the conversation (e.g.
+   * `"API Error: Rate limit reached"`). Unlike `Stop` and `SubagentStop`, this
+   * contains the API error string, not Claude's conversational output.
+   */
+  last_assistant_message?: string;
 }
 
+/**
+ * Input for `TeammateIdle` hooks. Fires when an agent team teammate is about to
+ * go idle after finishing its turn.
+ *
+ * No matcher support — fires on every occurrence.
+ *
+ * Exit code 2 sends the stderr message as feedback and the teammate continues
+ * working instead of going idle. Return `{"continue": false, "stopReason": "..."}`
+ * to stop the teammate entirely.
+ */
 export interface TeammateIdleInput extends HookInputCommon {
   hook_event_name: "TeammateIdle";
+  /** Always present for this event. */
   permission_mode: PermissionMode;
-  teammate_name: string;
+  /** Name of the agent team. */
   team_name: string;
+  /** Name of the teammate that is about to go idle. */
+  teammate_name: string;
 }
 
+/**
+ * Input for `InstructionsLoaded` hooks. Fires when a `CLAUDE.md` or
+ * `.claude/rules/*.md` file is loaded into context — at session start for
+ * eager files, and lazily when Claude accesses a subdirectory with a nested
+ * `CLAUDE.md` or when conditional rules with `paths:` frontmatter match.
+ *
+ * Matcher values: load reason — `"session_start"`, `"nested_traversal"`,
+ * `"path_glob_match"`, `"include"`, `"compact"`.
+ *
+ * No decision control — cannot block or modify instruction loading. Runs
+ * asynchronously for observability purposes (exit code is ignored).
+ */
 export interface InstructionsLoadedInput extends HookInputCommon {
   hook_event_name: "InstructionsLoaded";
+  /** Absolute path to the instruction file that was loaded. */
   file_path: string;
-  memory_type: MemoryType;
-  load_reason: LoadReason;
+  /**
+   * Path glob patterns from the file's `paths:` frontmatter, if any. Present
+   * only for `"path_glob_match"` loads.
+   */
   globs?: string[];
-  trigger_file_path?: string;
+  /**
+   * Why the file was loaded:
+   * - `"session_start"` — loaded at session start
+   * - `"nested_traversal"` — Claude accessed a subdirectory with a nested CLAUDE.md
+   * - `"path_glob_match"` — conditional rule's `paths:` frontmatter matched
+   * - `"include"` — included by a parent instruction file
+   * - `"compact"` — re-loaded after a compaction event
+   */
+  load_reason: "session_start" | "nested_traversal" | "path_glob_match" | "include" | "compact";
+  /**
+   * Scope of the file:
+   * - `"User"` — from `~/.claude/`
+   * - `"Project"` — from `.claude/` in the project root
+   * - `"Local"` — from `.claude/settings.local.json`
+   * - `"Managed"` — from managed policy settings
+   */
+  memory_type: "User" | "Project" | "Local" | "Managed";
+  /**
+   * Path to the parent instruction file that included this one. Present only
+   * for `"include"` loads.
+   */
   parent_file_path?: string;
+  /**
+   * Path to the file whose access triggered this load. Present for lazy loads
+   * (`"nested_traversal"` and `"path_glob_match"`).
+   */
+  trigger_file_path?: string;
 }
 
+/**
+ * Input for `ConfigChange` hooks. Fires when a configuration file changes during
+ * a session. Use to audit settings changes, enforce security policies, or block
+ * unauthorized modifications.
+ *
+ * Matcher values: `"user_settings"`, `"project_settings"`, `"local_settings"`,
+ * `"policy_settings"`, `"skills"`.
+ *
+ * Note: `"policy_settings"` changes cannot be blocked. Hooks still fire for
+ * audit logging, but blocking decisions are ignored.
+ */
 export interface ConfigChangeInput extends HookInputCommon {
   hook_event_name: "ConfigChange";
-  config_source: ConfigSource;
+  /** Absolute path to the specific file that was modified. May be absent for some sources. */
+  file_path?: string;
+  /**
+   * Which configuration type changed:
+   * - `"user_settings"` — `~/.claude/settings.json`
+   * - `"project_settings"` — `.claude/settings.json`
+   * - `"local_settings"` — `.claude/settings.local.json`
+   * - `"policy_settings"` — managed policy settings
+   * - `"skills"` — a skill file in `.claude/skills/`
+   */
+  source: "user_settings" | "project_settings" | "local_settings" | "policy_settings" | "skills";
 }
 
+/**
+ * Input for `CwdChanged` hooks. Fires when the working directory changes during
+ * a session (e.g. when Claude executes a `cd` command). Use to reload environment
+ * variables, activate project-specific toolchains, or run setup scripts.
+ *
+ * No matcher support — always fires on every directory change. Cannot block the
+ * directory change.
+ *
+ * Has access to `CLAUDE_ENV_FILE` for persisting environment variables into
+ * subsequent Bash commands. Only `type: "command"` hooks are supported.
+ */
 export interface CwdChangedInput extends HookInputCommon {
   hook_event_name: "CwdChanged";
+  /** The working directory after the change. */
+  new_cwd: string;
+  /** The working directory before the change. */
+  old_cwd: string;
 }
 
+/**
+ * Input for `FileChanged` hooks. Fires when a watched file changes on disk.
+ * Useful for reloading environment variables when project config files are
+ * modified. Pairs with `CwdChanged` for tools like direnv.
+ *
+ * The `matcher` field serves two roles: it builds the watch list (split on `|`,
+ * each segment registered as a literal filename) and filters which hook groups
+ * run when a file changes. Regex patterns are not useful here.
+ *
+ * Has access to `CLAUDE_ENV_FILE` for persisting environment variables.
+ * Only `type: "command"` hooks are supported. Cannot block file changes.
+ */
 export interface FileChangedInput extends HookInputCommon {
   hook_event_name: "FileChanged";
+  /**
+   * What happened to the file:
+   * - `"change"` — file was modified
+   * - `"add"` — file was created
+   * - `"unlink"` — file was deleted
+   */
+  event: "change" | "add" | "unlink";
+  /** Absolute path to the file that changed. */
   file_path: string;
 }
 
+/**
+ * Input for `WorktreeCreate` hooks. Fires when `claude --worktree` is used or a
+ * subagent uses `isolation: "worktree"`. The hook replaces the default git
+ * worktree behavior, allowing use of other VCS systems (SVN, Perforce, Mercurial).
+ *
+ * No matcher support.
+ *
+ * The hook MUST return the absolute path to the created worktree directory.
+ * Command hooks print it on stdout; HTTP hooks return it via
+ * `hookSpecificOutput.worktreePath`. Any non-zero exit code causes creation
+ * to fail.
+ *
+ * Note: `.worktreeinclude` is not processed when a hook is configured. Copy
+ * local config files (e.g. `.env`) inside the hook script if needed.
+ */
 export interface WorktreeCreateInput extends HookInputCommon {
   hook_event_name: "WorktreeCreate";
+  /**
+   * Slug identifier for the new worktree, either specified by the user or
+   * auto-generated (e.g. `"bold-oak-a3f2"`).
+   */
+  name: string;
 }
 
+/**
+ * Input for `WorktreeRemove` hooks. Fires when a worktree is being removed —
+ * either when a `--worktree` session exits, or when a subagent with
+ * `isolation: "worktree"` finishes.
+ *
+ * Pair with `WorktreeCreate` if using a non-git VCS; otherwise the worktree
+ * directory is left on disk.
+ *
+ * No decision control. Failures are logged in debug mode only.
+ */
 export interface WorktreeRemoveInput extends HookInputCommon {
   hook_event_name: "WorktreeRemove";
+  /**
+   * Absolute path to the worktree being removed. This is the path that was
+   * returned by the corresponding `WorktreeCreate` hook.
+   */
+  worktree_path: string;
 }
 
+/**
+ * Input for `PreCompact` hooks. Fires before Claude Code is about to run a
+ * compact operation.
+ *
+ * Matcher values: `"manual"` (`/compact`), `"auto"` (auto-compact when the
+ * context window is full).
+ *
+ * Exit code 2 or `decision: "block"` prevents compaction. Blocking automatic
+ * compaction has different effects depending on timing — if triggered proactively,
+ * compaction is skipped; if triggered to recover from a context-limit error, the
+ * underlying error surfaces.
+ */
 export interface PreCompactInput extends HookInputCommon {
   hook_event_name: "PreCompact";
+  /**
+   * For `"manual"` compaction: the instructions the user passed to `/compact`.
+   * For `"auto"` compaction: an empty string.
+   */
+  custom_instructions: string;
+  /** Whether compaction was triggered manually or automatically. */
   trigger: CompactTrigger;
 }
 
+/**
+ * Input for `PostCompact` hooks. Fires after Claude Code completes a compact
+ * operation. Use to log the generated summary or update external state.
+ *
+ * Matcher values: `"manual"`, `"auto"` (same as `PreCompact`).
+ *
+ * No decision control — cannot affect the compaction result.
+ */
 export interface PostCompactInput extends HookInputCommon {
   hook_event_name: "PostCompact";
+  /** The conversation summary generated by the compact operation. */
+  compact_summary: string;
+  /** Whether compaction was triggered manually or automatically. */
   trigger: CompactTrigger;
 }
 
+/**
+ * Input for `Elicitation` hooks. Fires when an MCP server requests user input
+ * mid-task. By default Claude Code shows an interactive dialog; hooks can
+ * intercept and respond programmatically, skipping the dialog entirely.
+ *
+ * Matcher values: MCP server name.
+ *
+ * Exit code 2 denies the elicitation and shows stderr to the user.
+ */
 export interface ElicitationInput extends HookInputCommon {
   hook_event_name: "Elicitation";
+  /** Unique identifier for this elicitation request. */
+  elicitation_id?: string;
+  /** The message shown to the user describing what is being requested. */
+  message: string;
+  /** Name of the MCP server requesting user input. */
   mcp_server_name: string;
+  /**
+   * Elicitation mode:
+   * - `"form"` — the server provided a JSON Schema for structured input
+   * - `"url"` — browser-based authentication flow
+   */
+  mode?: string;
+  /**
+   * JSON Schema describing the expected form fields, for `"form"` mode. Use to
+   * determine what to put in `content` when responding with `action: "accept"`.
+   */
+  requested_schema?: Record<string, unknown>;
+  /** Authentication URL for `"url"` mode elicitations. */
+  url?: string;
 }
 
+/**
+ * Input for `ElicitationResult` hooks. Fires after a user responds to an MCP
+ * elicitation, before the response is sent back to the MCP server. Hooks can
+ * observe, modify, or block the response.
+ *
+ * Matcher values: MCP server name.
+ *
+ * Exit code 2 blocks the response (effective action becomes `"decline"`).
+ */
 export interface ElicitationResultInput extends HookInputCommon {
   hook_event_name: "ElicitationResult";
+  /**
+   * The user's chosen action:
+   * - `"accept"` — user filled in the form and submitted
+   * - `"decline"` — user declined to provide input
+   * - `"cancel"` — user cancelled the dialog
+   */
+  action: "accept" | "decline" | "cancel";
+  /** Form field values submitted by the user, present for `"accept"` actions. */
+  content?: Record<string, unknown>;
+  /** Identifier matching the original `Elicitation` event. */
+  elicitation_id?: string;
+  /** Name of the MCP server that initiated the elicitation. */
   mcp_server_name: string;
+  /** Elicitation mode, matching the original `Elicitation` event. */
+  mode?: string;
+}
+
+/**
+ * Input for `SessionEnd` hooks. Fires when a Claude Code session ends. Useful
+ * for cleanup tasks, logging session statistics, or saving session state.
+ *
+ * Matcher values: exit reason — `"clear"`, `"resume"`, `"logout"`,
+ * `"prompt_input_exit"`, `"bypass_permissions_disabled"`, `"other"`.
+ *
+ * No decision control — cannot block session termination.
+ *
+ * Default timeout: 1.5 seconds. Set a per-hook `timeout` for longer-running
+ * cleanup (budget raised to the highest configured per-hook timeout, up to 60s).
+ * Override with `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS`.
+ */
+export interface SessionEndInput extends HookInputCommon {
+  hook_event_name: "SessionEnd";
+  /**
+   * Why the session ended:
+   * - `"clear"` — session cleared with `/clear`
+   * - `"resume"` — session switched via interactive `/resume`
+   * - `"logout"` — user logged out
+   * - `"prompt_input_exit"` — user exited while prompt input was visible
+   * - `"bypass_permissions_disabled"` — bypass permissions mode was disabled
+   * - `"other"` — other exit reasons
+   */
+  reason:
+    | "clear"
+    | "resume"
+    | "logout"
+    | "prompt_input_exit"
+    | "bypass_permissions_disabled"
+    | "other";
 }
 
 /**
  * Discriminated union of every possible hook stdin payload.
- * Narrow with `input.hook_event_name === "PreToolUse"`.
+ * Narrow with `input.hook_event_name === "PreToolUse"`, etc.
  */
 export type HookInput =
   | SessionStartInput
-  | SessionEndInput
   | UserPromptSubmitInput
   | PreToolUseInput
   | PermissionRequestInput
@@ -429,26 +1028,101 @@ export type HookInput =
   | PreCompactInput
   | PostCompactInput
   | ElicitationInput
-  | ElicitationResultInput;
+  | ElicitationResultInput
+  | SessionEndInput;
 
 // ============================================================================
 // Hook output schema (stdout JSON)
 // ============================================================================
 
+/**
+ * Decision values for `PreToolUse` hooks.
+ *
+ * - `"allow"` — skip the permission prompt and proceed
+ * - `"deny"` — prevent the tool call; reason shown to Claude
+ * - `"ask"` — prompt the user to confirm; reason shown to user
+ * - `"defer"` — exit gracefully so the tool can be resumed later
+ *   (non-interactive mode with `-p` flag only)
+ *
+ * When multiple hooks return different decisions, precedence is:
+ * `deny` > `defer` > `ask` > `allow`.
+ */
 export type PermissionDecision = "allow" | "deny" | "ask" | "defer";
 
-export interface PreToolUseHookOutput {
-  hookEventName: "PreToolUse";
-  permissionDecision?: PermissionDecision;
-  permissionDecisionReason?: string;
-  /** Replaces the entire tool_input Claude generated. */
-  updatedInput?: Record<string, unknown>;
+/**
+ * `hookSpecificOutput` for `SessionStart` events. Adds context to the session.
+ */
+export interface SessionStartHookOutput {
+  hookEventName: "SessionStart";
+  /** String added to Claude's context. Multiple hooks' values are concatenated. */
   additionalContext?: string;
 }
 
-export interface PermissionRequestDecision {
-  behavior: "allow" | "deny";
+/**
+ * `hookSpecificOutput` for `UserPromptSubmit` events. Adds context and can set
+ * the session title.
+ */
+export interface UserPromptSubmitHookOutput {
+  hookEventName: "UserPromptSubmit";
+  /** String added to Claude's context. */
+  additionalContext?: string;
+  /** Sets the session title (same effect as `/rename`). */
+  sessionTitle?: string;
+}
+
+/**
+ * `hookSpecificOutput` for `PreToolUse` events. Provides richer control than
+ * the top-level `decision` field: four outcomes plus the ability to modify tool
+ * input before execution.
+ *
+ * Note: PreToolUse previously used top-level `decision` and `reason`, which are
+ * deprecated for this event. The deprecated values `"approve"` and `"block"`
+ * map to `"allow"` and `"deny"` respectively.
+ */
+export interface PreToolUseHookOutput {
+  hookEventName: "PreToolUse";
+  /**
+   * String added to Claude's context before the tool executes. Ignored for
+   * `"defer"`.
+   */
+  additionalContext?: string;
+  /**
+   * Allow, deny, ask, or defer. Deny and ask permission rules are still
+   * evaluated regardless of what this hook returns.
+   */
+  permissionDecision?: PermissionDecision;
+  /**
+   * Shown to the user for `"allow"` and `"ask"` decisions; shown to Claude for
+   * `"deny"`; ignored for `"defer"`.
+   */
+  permissionDecisionReason?: string;
+  /**
+   * Replaces the entire `tool_input` before execution. Include unchanged fields
+   * alongside modified ones. Ignored for `"defer"`.
+   */
   updatedInput?: Record<string, unknown>;
+}
+
+/**
+ * The allow/deny decision returned in `PermissionRequestHookOutput.decision`.
+ */
+export interface PermissionRequestDecision {
+  /** `"allow"` grants the permission; `"deny"` denies it. */
+  behavior: "allow" | "deny";
+  /** For `"deny"` only: if `true`, stops Claude entirely. */
+  interrupt?: boolean;
+  /** For `"deny"` only: tells Claude why the permission was denied. */
+  message?: string;
+  /**
+   * For `"allow"` only: modifies the tool's input before execution. Replaces
+   * the entire input object; include unchanged fields alongside modified ones.
+   */
+  updatedInput?: Record<string, unknown>;
+  /**
+   * For `"allow"` only: permission updates to apply (add/replace/remove rules,
+   * change mode, add/remove directories). Can echo a `permission_suggestions`
+   * entry from the input to apply an "always allow" rule.
+   */
   updatedPermissions?: Array<{
     type:
       | "addRules"
@@ -467,126 +1141,252 @@ export interface PermissionRequestDecision {
       | "projectSettings"
       | "userSettings";
   }>;
-  message?: string;
-  interrupt?: boolean;
 }
 
+/**
+ * `hookSpecificOutput` for `PermissionRequest` events. Allows or denies a
+ * permission request on behalf of the user.
+ */
 export interface PermissionRequestHookOutput {
   hookEventName: "PermissionRequest";
+  /** Allow or deny decision with optional rule persistence. */
   decision?: PermissionRequestDecision;
 }
 
-export interface PostToolUseHookOutput {
-  hookEventName: "PostToolUse";
-  additionalContext?: string;
-  /** MCP tools only — replaces the tool_response. */
-  updatedMCPToolOutput?: unknown;
-}
-
-export interface PostToolUseFailureHookOutput {
-  hookEventName: "PostToolUseFailure";
-  additionalContext?: string;
-}
-
+/**
+ * `hookSpecificOutput` for `PermissionDenied` events. Tells the model whether
+ * it may retry the denied tool call.
+ */
 export interface PermissionDeniedHookOutput {
   hookEventName: "PermissionDenied";
-  /** true = tell the model it may retry. */
+  /**
+   * If `true`, Claude Code adds a message to the conversation telling the model
+   * it may retry the tool call. The denial itself is not reversed. If absent or
+   * `false`, the denial stands.
+   */
   retry?: boolean;
 }
 
-export interface UserPromptSubmitHookOutput {
-  hookEventName: "UserPromptSubmit";
+/**
+ * `hookSpecificOutput` for `PostToolUse` events. Provides feedback to Claude
+ * after tool execution.
+ */
+export interface PostToolUseHookOutput {
+  hookEventName: "PostToolUse";
+  /** Additional context for Claude to consider. */
   additionalContext?: string;
-  sessionTitle?: string;
+  /**
+   * For MCP tools only: replaces the tool's output with the provided value.
+   * Has no effect on built-in tools.
+   */
+  updatedMCPToolOutput?: unknown;
 }
 
-export interface SessionStartHookOutput {
-  hookEventName: "SessionStart";
+/**
+ * `hookSpecificOutput` for `PostToolUseFailure` events. Provides context to
+ * Claude after a tool failure.
+ */
+export interface PostToolUseFailureHookOutput {
+  hookEventName: "PostToolUseFailure";
+  /** Additional context for Claude to consider alongside the error. */
   additionalContext?: string;
-  sessionTitle?: string;
 }
 
-export interface SubagentStartHookOutput {
-  hookEventName: "SubagentStart";
-  additionalContext?: string;
-}
-
+/**
+ * `hookSpecificOutput` for `Notification` events. Adds context to the
+ * conversation.
+ */
 export interface NotificationHookOutput {
   hookEventName: "Notification";
+  /** String added to Claude's context. */
   additionalContext?: string;
 }
 
+/**
+ * `hookSpecificOutput` for `SubagentStart` events. Injects context into the
+ * spawned subagent.
+ */
+export interface SubagentStartHookOutput {
+  hookEventName: "SubagentStart";
+  /** String added to the subagent's context. */
+  additionalContext?: string;
+}
+
+/**
+ * `hookSpecificOutput` for `CwdChanged` events. Dynamically updates which file
+ * paths `FileChanged` watches.
+ */
+export interface CwdChangedHookOutput {
+  hookEventName: "CwdChanged";
+  /**
+   * Array of absolute paths. Replaces the current dynamic watch list (paths
+   * from `matcher` configuration are always watched). Return an empty array to
+   * clear the dynamic list, which is typical when entering a new directory.
+   */
+  watchPaths?: string[];
+}
+
+/**
+ * `hookSpecificOutput` for `FileChanged` events. Dynamically updates which file
+ * paths are watched.
+ */
+export interface FileChangedHookOutput {
+  hookEventName: "FileChanged";
+  /**
+   * Array of absolute paths. Replaces the current dynamic watch list (paths
+   * from `matcher` configuration are always watched). Use this when the hook
+   * discovers additional files to watch based on the changed file.
+   */
+  watchPaths?: string[];
+}
+
+/**
+ * `hookSpecificOutput` for `WorktreeCreate` events. Used by HTTP hooks to
+ * return the worktree path. Command hooks print the path to stdout instead.
+ */
 export interface WorktreeCreateHookOutput {
   hookEventName: "WorktreeCreate";
-  /** HTTP hooks return path here; command hooks print to stdout instead. */
+  /**
+   * Absolute path to the created worktree directory. Required — worktree
+   * creation fails if no path is returned. HTTP hooks return it here; command
+   * hooks print it to stdout.
+   */
   worktreePath?: string;
 }
 
+/**
+ * `hookSpecificOutput` for `Elicitation` events. Allows responding
+ * programmatically without showing the user dialog.
+ */
 export interface ElicitationHookOutput {
   hookEventName: "Elicitation";
+  /**
+   * Whether to accept, decline, or cancel the request:
+   * - `"accept"` — submit the form with `content`
+   * - `"decline"` — decline to provide input
+   * - `"cancel"` — cancel the dialog
+   */
   action?: "accept" | "decline" | "cancel";
+  /**
+   * Form field values to submit. Only used when `action` is `"accept"`. Keys
+   * and types should match the `requested_schema` from the input.
+   */
   content?: Record<string, unknown>;
 }
 
+/**
+ * `hookSpecificOutput` for `ElicitationResult` events. Overrides the user's
+ * response before it is sent back to the MCP server.
+ */
 export interface ElicitationResultHookOutput {
   hookEventName: "ElicitationResult";
+  /**
+   * Overrides the user's action:
+   * - `"accept"` — submit with `content`
+   * - `"decline"` — decline
+   * - `"cancel"` — cancel
+   */
   action?: "accept" | "decline" | "cancel";
+  /**
+   * Overrides form field values. Only meaningful when `action` is `"accept"`.
+   */
   content?: Record<string, unknown>;
 }
 
+/**
+ * Discriminated union of all event-specific hook output objects.
+ * Set on `HookOutput.hookSpecificOutput` along with `hookEventName`.
+ */
 export type HookSpecificOutput =
+  | SessionStartHookOutput
+  | UserPromptSubmitHookOutput
   | PreToolUseHookOutput
   | PermissionRequestHookOutput
+  | PermissionDeniedHookOutput
   | PostToolUseHookOutput
   | PostToolUseFailureHookOutput
-  | PermissionDeniedHookOutput
-  | UserPromptSubmitHookOutput
-  | SessionStartHookOutput
-  | SubagentStartHookOutput
   | NotificationHookOutput
+  | SubagentStartHookOutput
+  | CwdChangedHookOutput
+  | FileChangedHookOutput
   | WorktreeCreateHookOutput
   | ElicitationHookOutput
   | ElicitationResultHookOutput;
 
 /**
- * Root JSON object written to stdout.
- * All fields are optional; an empty object (or empty stdout) means "no-op, allow".
+ * Root JSON object written to stdout by a hook command (or returned as the HTTP
+ * response body by an HTTP hook).
+ *
+ * All fields are optional. An empty object (or empty stdout) means "no-op, allow".
+ *
+ * Hook output injected into context (`additionalContext`, `systemMessage`, or
+ * plain stdout) is capped at 10,000 characters.
  */
 export interface HookOutput {
-  /** Default true. If false, Claude halts execution entirely. */
+  /**
+   * Default `true`. If `false`, Claude halts execution entirely after the hook
+   * runs, regardless of the event. Takes precedence over any event-specific
+   * decision fields. `stopReason` is shown to the user.
+   */
   continue?: boolean;
-  /** Shown when `continue: false`. */
+  /**
+   * Top-level block decision. Supported by: `UserPromptSubmit`, `PostToolUse`,
+   * `PostToolUseFailure`, `Stop`, `SubagentStop`, `ConfigChange`, `PreCompact`.
+   * The only valid value is `"block"`. Omit to allow the action to proceed.
+   */
+  decision?: "block";
+  /** Event-specific output fields. Requires `hookEventName` set to the current event. */
+  hookSpecificOutput?: HookSpecificOutput;
+  /**
+   * Shown to the user (or Claude, depending on event) when `decision` is
+   * `"block"`. Also used with `SubagentStop` and `Stop` to explain why Claude
+   * should continue.
+   */
+  reason?: string;
+  /** Message shown to the user when `continue` is `false`. Not shown to Claude. */
   stopReason?: string;
-  /** Suppress stdout from the debug log. */
+  /** If `true`, omits stdout from the debug log. */
   suppressOutput?: boolean;
   /** Warning message shown to the user. */
   systemMessage?: string;
-  /**
-   * Event-specific top-level block decision. Supported by:
-   * UserPromptSubmit, PostToolUse, PostToolUseFailure, Stop, SubagentStop, ConfigChange.
-   */
-  decision?: "block";
-  /** Shown with `decision: "block"`. */
-  reason?: string;
-  hookSpecificOutput?: HookSpecificOutput;
 }
 
 // ============================================================================
 // Plugin/hook environment variables
 // ============================================================================
 
+/**
+ * Environment variables available inside hook commands. Use these to reference
+ * scripts relative to the project or plugin root, regardless of the working
+ * directory when the hook runs.
+ */
 export interface HookEnv {
-  /** Project root. Quote for paths with spaces. */
-  CLAUDE_PROJECT_DIR?: string;
-  /** Plugin install dir (changes on updates). */
-  CLAUDE_PLUGIN_ROOT?: string;
-  /** Plugin persistent data dir (survives updates). */
-  CLAUDE_PLUGIN_DATA?: string;
   /**
-   * SessionStart, CwdChanged, FileChanged only.
-   * Path to a file where the hook can write `export VAR=value` lines to persist env.
+   * Path to a file where the hook can write `export VAR=value` lines to persist
+   * environment variables for subsequent Bash commands in the session. Use
+   * append (`>>`) to preserve variables set by other hooks.
+   *
+   * Available in `SessionStart`, `CwdChanged`, and `FileChanged` hooks only.
    */
   CLAUDE_ENV_FILE?: string;
-  /** "true" in web environment; unset locally. */
+  /**
+   * Set to `"true"` in remote web environments (e.g. claude.ai/code). Not set
+   * in the local CLI.
+   */
   CLAUDE_CODE_REMOTE?: "true";
+  /**
+   * The plugin's persistent data directory. Survives plugin updates. Use for
+   * dependencies and state that should persist across plugin versions.
+   */
+  CLAUDE_PLUGIN_DATA?: string;
+  /**
+   * The plugin's installation directory. Changes on each plugin update. Use for
+   * scripts bundled with a plugin.
+   */
+  CLAUDE_PLUGIN_ROOT?: string;
+  /**
+   * The project root directory. Wrap in quotes to handle paths with spaces:
+   * `"$CLAUDE_PROJECT_DIR"/.claude/hooks/script.sh`.
+   */
+  CLAUDE_PROJECT_DIR?: string;
 }
