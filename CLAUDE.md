@@ -59,3 +59,7 @@ git push && git push --tags
 ## Retry budget
 
 Per user preference in `~/.claude/CLAUDE.md`: 5 attempts → research → 3 attempts → give up (file issue + BLOCKERS.md entry + assign to @fnrhombus). This repo has a `BLOCKERS.md` at the root. The autonomous `scripts/dev-cycle.ts` pipeline enforces this budget programmatically.
+
+## Migration Warning (2026-04-12)
+
+This repo was re-cloned during a c:\dev → V:\ migration. Some untracked/local files may be missing. Don't be surprised if something is broken. Remove this note once the project is confirmed working.
