@@ -91,6 +91,8 @@ function die(msg: string): never {
 interface CaptureOptions {
   allowFailure?: boolean;
   input?: string;
+  /** Inherit stderr instead of capturing it (streams to terminal). */
+  inheritStderr?: boolean;
 }
 
 interface CaptureResult {
@@ -121,10 +123,10 @@ function run(cmd: string, args: string[], options: SpawnSyncOptions = {}): void 
 function capture(
   cmd: string,
   args: string[],
-  { allowFailure = false, input }: CaptureOptions = {},
+  { allowFailure = false, input, inheritStderr = false }: CaptureOptions = {},
 ): CaptureResult {
   const res = spawnSync(cmd, args, {
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", inheritStderr ? "inherit" : "pipe"],
     shell: false,
     encoding: "utf8",
     ...(input !== undefined ? { input } : {}),
@@ -178,7 +180,7 @@ function claudeRun(prompt: string, opts: ClaudeRunOptions = {}): string {
       "text",
       prompt,
     ],
-    { allowFailure },
+    { allowFailure, inheritStderr: true },
   );
   return res.stdout.trim();
 }
